@@ -28,5 +28,15 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+/.idea/
+/.vscode/
+
+# Kubeconfig might contain secrets
+*.kubeconfig
+
+.bin
+vendor
+target
+local-test
+.env
+test
