@@ -1,0 +1,19 @@
+global:
+  imagePullSecrets:
+    - name: "ces-container-registries"
+
+manager:
+  replicas: 1
+  image:
+    registry: docker.io
+    repository: cloudogu/service-account-operator
+    tag: 0.0.1
+  imagePullPolicy: IfNotPresent
+  env:
+    logLevel: info
+    stage: production
+  resourceLimits:
+    memory: 128Mi
+  resourceRequests:
+    cpu: 50m
+    memory: 128Mi
