@@ -3,8 +3,9 @@ module github.com/cloudogu/service-account-operator
 go 1.26.0
 
 require (
-	github.com/cloudogu/k8s-serviceaccount-lib v0.0.0
+	github.com/cloudogu/k8s-serviceaccount-lib v0.0.0-20260422083036-73f36f0e6790
 	github.com/go-logr/logr v1.4.3
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 	k8s.io/apimachinery v0.35.3
 	k8s.io/client-go v0.35.3
@@ -50,6 +51,7 @@ require (
 	github.com/spf13/cobra v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
@@ -92,5 +94,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/cloudogu/k8s-serviceaccount-lib => /home/bernst/projects/k8s-serviceaccount-lib

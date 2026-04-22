@@ -19,6 +19,7 @@ include build/make/test-unit.mk
 include build/make/static-analysis.mk
 include build/make/clean.mk
 include build/make/digital-signature.mk
+include build/make/mocks.mk
 
 K8S_COMPONENT_SOURCE_VALUES = ${HELM_SOURCE_DIR}/values.yaml
 K8S_COMPONENT_TARGET_VALUES = ${HELM_TARGET_DIR}/values.yaml
@@ -31,6 +32,11 @@ IMAGE_IMPORT_TARGET=image-import
 include build/make/k8s-controller.mk
 
 GO_BUILD_FLAGS=-mod=vendor -a -o $(BINARY) ./cmd/main.go
+
+.PHONY: mocks
+mocks: ${MOCKERY_BIN} ${MOCKERY_YAML} ## target is used to generate mocks for all interfaces in a project.
+	${MOCKERY_BIN}
+	@echo "Mocks successfully created."
 
 .PHONY: build-boot
 build-boot: helm-apply kill-operator-pod ## Builds a new version of the operator and deploys it into the K8s-EcoSystem.
