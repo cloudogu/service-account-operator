@@ -1,6 +1,6 @@
 #!groovy
 
-@Library('github.com/cloudogu/ces-build-lib@5.1.0')
+@Library('github.com/cloudogu/ces-build-lib@5.3.1')
 import com.cloudogu.ces.cesbuildlib.*
 
 git = new Git(this, "cesmarvin")
@@ -77,7 +77,7 @@ node('docker') {
 //             stageStaticAnalysisSonarQube()
 //         }
 
-        stageSmokeTest()
+        stageSmokeTest(makefile)
 
         stageAutomaticRelease(makefile)
     }
@@ -126,8 +126,9 @@ void stageStaticAnalysisSonarQube() {
     }
 }
 
-void stageSmokeTest() {
+void stageSmokeTest(Makefile makefile) {
     K3d k3d = new K3d(this, "${WORKSPACE}", "${WORKSPACE}/k3d", env.PATH)
+    String releaseDeploymentName = "${repositoryName}-${repositoryName}"
 
     try {
         String controllerVersion = makefile.getVersion()
@@ -144,7 +145,7 @@ void stageSmokeTest() {
 
         stage('Update smoke test resources') {
             def repository = imageName.substring(0, imageName.lastIndexOf(":"))
-            docker.image("golang:${goVersion}")
+            new Docker(this).image("golang:${goVersion}")
                     .mountJenkinsUser()
                     .inside("--volume ${WORKSPACE}:/workdir -w /workdir") {
                         sh "STAGE=development IMAGE_DEV=${repository} make helm-values-replace-image-repo"
@@ -165,10 +166,11 @@ void stageSmokeTest() {
         }
 
         stage('Wait for smoke test rollout') {
-            k3d.kubectl("--namespace default rollout status deployment/${repositoryName}")
+            k3d.kubectl("--namespace default rollout status deployment/${releaseDeploymentName}")
             k3d.kubectl("--namespace default wait --for=condition=Ready pods -l app.kubernetes.io/name=${repositoryName} --timeout=120s")
         }
     } catch(Exception e) {
+        echo "Smoke test failed: ${e}"
         k3d.collectAndArchiveLogs()
         throw e as java.lang.Throwable
     } finally {
