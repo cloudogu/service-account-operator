@@ -77,6 +77,8 @@ node('docker') {
             stageStaticAnalysisSonarQube()
         }
 
+        stageSmokeTest()
+
         stageAutomaticRelease(makefile)
     }
 }
@@ -120,6 +122,58 @@ void stageStaticAnalysisSonarQube() {
         def qGate = waitForQualityGate()
         if (qGate.status != 'OK') {
             unstable("Pipeline unstable due to SonarQube quality gate failure")
+        }
+    }
+}
+
+void stageSmokeTest() {
+    K3d k3d = new K3d(this, "${WORKSPACE}", "${WORKSPACE}/k3d", env.PATH)
+
+    try {
+        String controllerVersion = makefile.getVersion()
+
+        stage('Set up k3d cluster') {
+            k3d.startK3d()
+        }
+
+        def imageName
+        String namespace = "cloudogu"
+        stage('Build & Push Image for Smoke Test') {
+            imageName = k3d.buildAndPushToLocalRegistry("${namespace}/${repositoryName}", controllerVersion)
+        }
+
+        stage('Update smoke test resources') {
+            def repository = imageName.substring(0, imageName.lastIndexOf(":"))
+            docker.image("golang:${goVersion}")
+                    .mountJenkinsUser()
+                    .inside("--volume ${WORKSPACE}:/workdir -w /workdir") {
+                        sh "STAGE=development IMAGE_DEV=${repository} make helm-values-replace-image-repo"
+                    }
+        }
+
+        stage('Deploy smoke test resources') {
+            withCredentials([usernamePassword(credentialsId: 'harborhelmchartpush', usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
+               try {
+                k3d.helm("registry login ${registry} --username '${HARBOR_USERNAME}' --password '${HARBOR_PASSWORD}'")
+                k3d.helm("install k8s-serviceaccount-crd oci://${registry}/k8s/k8s-serviceaccount-crd --version 1.0.0")
+              } finally {
+                k3d.helm("registry logout ${registry}")
+              }
+            }
+
+            k3d.helm("install ${repositoryName} ${helmChartDir}")
+        }
+
+        stage('Wait for smoke test rollout') {
+            k3d.kubectl("--namespace default rollout status deployment/${repositoryName}")
+            k3d.kubectl("--namespace default wait --for=condition=Ready pods -l app.kubernetes.io/name=${repositoryName} --timeout=120s")
+        }
+    } catch(Exception e) {
+        k3d.collectAndArchiveLogs()
+        throw e as java.lang.Throwable
+    } finally {
+        stage('Remove k3d cluster') {
+            k3d.deleteK3d()
         }
     }
 }
