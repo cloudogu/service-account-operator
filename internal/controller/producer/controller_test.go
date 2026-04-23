@@ -24,14 +24,14 @@ func TestControllerReconcileReturnsSuccessForExistingObject(t *testing.T) {
 			LocalSecretRef: serviceaccountv1.LocalSecretRef{Name: "nexus-auth"},
 			Key:            "token",
 		},
-	}
-	obj.Spec.Return = map[serviceaccountv1.AttributeName]serviceaccountv1.ProducerReturnDefinition{
-		"username": {Description: "Generated username", Type: "string"},
-		"password": {Description: "Generated password", Type: "string"},
-	}
-	obj.Spec.Params = &serviceaccountv1.ProducerParams{
-		Attributes: map[serviceaccountv1.AttributeName]serviceaccountv1.AttributeDefinition{
-			"permissions": {Description: "Granted permissions", Type: "string"},
+		Return: map[serviceaccountv1.AttributeName]serviceaccountv1.ProducerReturnDefinition{
+			"username": {Description: "Generated username"},
+			"password": {Description: "Generated password"},
+		},
+		Params: &serviceaccountv1.ProducerParams{
+			Attributes: map[serviceaccountv1.AttributeName]serviceaccountv1.AttributeDefinition{
+				"permissions": {Description: "Granted permissions", Type: "string"},
+			},
 		},
 	}
 
