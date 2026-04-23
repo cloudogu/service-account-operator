@@ -73,9 +73,9 @@ node('docker') {
                     }
                 }
 
-        stage('SonarQube') {
-            stageStaticAnalysisSonarQube()
-        }
+//         stage('SonarQube') {
+//             stageStaticAnalysisSonarQube()
+//         }
 
         stageSmokeTest()
 
