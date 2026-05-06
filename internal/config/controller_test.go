@@ -9,7 +9,7 @@ import (
 )
 
 func TestCreateTLSOptions(t *testing.T) {
-	t.Run("should add HTTP/2 disable option by default", func(t *testing.T) {
+	t.Run("should add HTTP/2 disable option when HTTP/2 is disabled", func(t *testing.T) {
 		tlsOpts := createTLSOptions(Flags{EnableHTTP2: false})
 		if len(tlsOpts) != 1 {
 			t.Fatalf("len(TLSOpts) = %d, want 1", len(tlsOpts))

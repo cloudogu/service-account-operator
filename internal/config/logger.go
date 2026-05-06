@@ -9,6 +9,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+// logSink mirrors logr.LogSink so tests can generate a mock for the controller-runtime logger sink
+// abstraction without depending on the concrete zap-backed implementation.
+//
 //nolint:unused
 type logSink interface {
 	logr.LogSink
@@ -25,7 +28,7 @@ func ConfigureLogger() {
 func getZapOptions() zap.Options {
 	var logLevel uberzap.AtomicLevel
 
-	envLogLevel, err := GetLogLevel()
+	envLogLevel, err := getLogLevel()
 	if err != nil {
 		fmt.Printf("unable to get configured log level, using info level instead\n  %s\n", err.Error())
 		logLevel = uberzap.NewAtomicLevelAt(uberzap.InfoLevel)
@@ -38,7 +41,7 @@ func getZapOptions() zap.Options {
 	}
 
 	return zap.Options{
-		Development: IsStageDevelopment(),
+		Development: isStageDevelopment(),
 		Level:       logLevel,
 	}
 }

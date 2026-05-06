@@ -14,10 +14,6 @@ rules:
       - get
       - list
       - watch
-      - create
-      - update
-      - patch
-      - delete
   - apiGroups:
       - k8s.cloudogu.com
     resources:

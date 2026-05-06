@@ -22,6 +22,6 @@ LABEL maintainer="hello@cloudogu.com" \
 
 WORKDIR /
 COPY --from=builder /workspace/service-account-operator .
-USER 65532:65532
+USER nonroot:nonroot
 
 ENTRYPOINT ["/service-account-operator"]

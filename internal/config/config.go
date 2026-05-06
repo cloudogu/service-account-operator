@@ -19,20 +19,24 @@ const (
 var log = ctrl.Log.WithName("config")
 var Stage = StageProduction
 
-func IsStageDevelopment() bool {
+func isStageDevelopment() bool {
 	return Stage == StageDevelopment
 }
 
+// OperatorConfig contains the runtime configuration required to start the operator.
 type OperatorConfig struct {
+	// Namespace contains the Kubernetes namespace watched by the operator cache.
 	Namespace string
 
+	// ControllerOptions contains the controller-runtime manager configuration.
 	ControllerOptions ctrl.Options
 }
 
+// NewOperatorConfig builds the operator runtime configuration from environment and flags.
 func NewOperatorConfig(scheme *runtime.Scheme) (*OperatorConfig, error) {
 	configureStage()
 
-	namespace, err := GetNamespace()
+	namespace, err := getNamespace()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read namespace: %w", err)
 	}
@@ -53,12 +57,12 @@ func configureStage() {
 		Stage = StageProduction
 	}
 
-	if IsStageDevelopment() {
+	if isStageDevelopment() {
 		log.Info("starting in development mode")
 	}
 }
 
-func GetLogLevel() (string, error) {
+func getLogLevel() (string, error) {
 	logLevel, err := getEnvVar(logLevelEnvVar)
 	if err != nil {
 		return "", fmt.Errorf("failed to get env var [%s]: %w", logLevelEnvVar, err)
@@ -67,7 +71,7 @@ func GetLogLevel() (string, error) {
 	return logLevel, nil
 }
 
-func GetNamespace() (string, error) {
+func getNamespace() (string, error) {
 	namespace, err := getEnvVar(namespaceEnvVar)
 	if err != nil {
 		return "", fmt.Errorf("failed to get env var [%s]: %w", namespaceEnvVar, err)

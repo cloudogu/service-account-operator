@@ -6,8 +6,3 @@ metavalues:
     description: The central configuration value to set the log level for this component
     keys:
       - path: manager.env.logLevel
-        mapping:
-          debug: debug
-          info: info
-          warn: warn
-          error: error

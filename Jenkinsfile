@@ -128,7 +128,7 @@ void stageStaticAnalysisSonarQube() {
 
 void stageSmokeTest(Makefile makefile) {
     K3d k3d = new K3d(this, "${WORKSPACE}", "${WORKSPACE}/k3d", env.PATH)
-    String releaseDeploymentName = "${repositoryName}-${repositoryName}"
+    String releaseDeploymentName = "${repositoryName}"
 
     try {
         String controllerVersion = makefile.getVersion()
@@ -186,15 +186,7 @@ void stageAutomaticRelease(Makefile makefile) {
         String releaseVersion = "v${controllerVersion}".toString()
 
         stage('Build & Push Image') {
-            withCredentials([usernamePassword(credentialsId: 'cesmarvin',
-                    passwordVariable: 'CES_MARVIN_PASSWORD',
-                    usernameVariable: 'CES_MARVIN_USERNAME')]) {
-                sh "echo \"machine github.com\n" +
-                        "login ${CES_MARVIN_USERNAME}\n" +
-                        "password ${CES_MARVIN_PASSWORD}\" >> ~/.netrc"
-            }
             def dockerImage = docker.build("cloudogu/${repositoryName}:${controllerVersion}")
-            sh "rm ~/.netrc"
             docker.withRegistry('https://registry.hub.docker.com/', 'dockerHubCredentials') {
                 dockerImage.push("${controllerVersion}")
             }

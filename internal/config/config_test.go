@@ -105,13 +105,13 @@ func TestIsStageDevelopment(t *testing.T) {
 	})
 
 	Stage = StageDevelopment
-	if !IsStageDevelopment() {
-		t.Fatal("IsStageDevelopment() = false, want true")
+	if !isStageDevelopment() {
+		t.Fatal("isStageDevelopment() = false, want true")
 	}
 
 	Stage = StageProduction
-	if IsStageDevelopment() {
-		t.Fatal("IsStageDevelopment() = true, want false")
+	if isStageDevelopment() {
+		t.Fatal("isStageDevelopment() = true, want false")
 	}
 }
 
@@ -121,24 +121,24 @@ func TestGetLogLevel(t *testing.T) {
 			return "", false
 		})
 
-		got, err := GetLogLevel()
+		got, err := getLogLevel()
 		if err == nil {
-			t.Fatal("GetLogLevel() expected error")
+			t.Fatal("getLogLevel() expected error")
 		}
 		if got != "" {
-			t.Fatalf("GetLogLevel() = %q, want empty string", got)
+			t.Fatalf("getLogLevel() = %q, want empty string", got)
 		}
 	})
 
 	t.Run("returns configured value when LOG_LEVEL is set", func(t *testing.T) {
 		t.Setenv(logLevelEnvVar, "debug")
 
-		got, err := GetLogLevel()
+		got, err := getLogLevel()
 		if err != nil {
-			t.Fatalf("GetLogLevel() returned error: %v", err)
+			t.Fatalf("getLogLevel() returned error: %v", err)
 		}
 		if got != "debug" {
-			t.Fatalf("GetLogLevel() = %q, want %q", got, "debug")
+			t.Fatalf("getLogLevel() = %q, want %q", got, "debug")
 		}
 	})
 }
@@ -149,24 +149,24 @@ func TestGetNamespace(t *testing.T) {
 			return "", false
 		})
 
-		got, err := GetNamespace()
+		got, err := getNamespace()
 		if err == nil {
-			t.Fatal("GetNamespace() expected error")
+			t.Fatal("getNamespace() expected error")
 		}
 		if got != "" {
-			t.Fatalf("GetNamespace() = %q, want empty string", got)
+			t.Fatalf("getNamespace() = %q, want empty string", got)
 		}
 	})
 
 	t.Run("returns configured value when NAMESPACE is set", func(t *testing.T) {
 		t.Setenv(namespaceEnvVar, "cloudogu")
 
-		got, err := GetNamespace()
+		got, err := getNamespace()
 		if err != nil {
-			t.Fatalf("GetNamespace() returned error: %v", err)
+			t.Fatalf("getNamespace() returned error: %v", err)
 		}
 		if got != "cloudogu" {
-			t.Fatalf("GetNamespace() = %q, want %q", got, "cloudogu")
+			t.Fatalf("getNamespace() = %q, want %q", got, "cloudogu")
 		}
 	})
 }

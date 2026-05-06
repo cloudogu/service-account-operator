@@ -67,8 +67,12 @@ spec:
               drop:
                 - ALL
       securityContext:
+        # Distroless uses the nonroot user with UID/GID 65532. Set the numeric values explicitly
+        # so Kubernetes can verify runAsNonRoot without relying on name resolution from the image.
+        runAsUser: 65532
+        runAsGroup: 65532
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: {{ include "service-account-operator.fullname" . }}
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: 15

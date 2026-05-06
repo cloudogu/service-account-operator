@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,7 +46,7 @@ func TestControllerReconcileReturnsSuccessForExistingObject(t *testing.T) {
 	result, err := controller.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "example-producer"},
 	})
-	require.NoError(err, "Reconcile() failed")
+	require.NoError(t, err, "Reconcile() failed")
 
 	if result != (ctrl.Result{}) {
 		t.Fatalf("Reconcile() = %#v, want empty result", result)
@@ -61,9 +62,7 @@ func TestControllerReconcileIgnoresNotFound(t *testing.T) {
 	result, err := controller.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "missing-producer"},
 	})
-	if err != nil {
-		t.Fatalf("Reconcile() returned error: %v", err)
-	}
+	require.NoError(t, err, "Reconcile() failed")
 
 	if result != (ctrl.Result{}) {
 		t.Fatalf("Reconcile() = %#v, want empty result", result)
@@ -75,9 +74,7 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 
 	scheme := runtime.NewScheme()
 	metav1.AddToGroupVersion(scheme, serviceaccountv1.GroupVersion)
-	if err := serviceaccountv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() returned error: %v", err)
-	}
+	require.NoError(t, serviceaccountv1.AddToScheme(scheme), "AddToScheme() failed")
 
 	return scheme
 }

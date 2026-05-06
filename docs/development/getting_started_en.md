@@ -6,6 +6,24 @@ This repository contains the `service-account-operator`.
 
 - The `ServiceAccountRequest` and `ServiceAccountProducer` CRDs installed in the cluster
 
+If the CRDs are not installed yet, they can for example be installed as a Component:
+
+```shell
+kubectl apply -f - <<EOF
+apiVersion: k8s.cloudogu.com/v1
+kind: Component
+metadata:
+  name: k8s-serviceaccount-crd
+  labels:
+    app: ces
+    app.kubernetes.io/name: k8s-serviceaccount-crd
+spec:
+  name: k8s-serviceaccount-crd
+  namespace: k8s
+  version: 1.0.0
+EOF
+```
+
 Check if the CRDs exist:
 
 ```shell

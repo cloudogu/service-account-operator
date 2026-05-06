@@ -28,8 +28,8 @@ import (
 const gracefulShutdownTimeout = 15 * time.Second
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme  = runtime.NewScheme()
+	mainLog = ctrl.Log.WithName("main")
 )
 
 func init() {
@@ -42,12 +42,12 @@ func main() {
 
 	cfg, err := config.NewOperatorConfig(scheme)
 	if err != nil {
-		setupLog.Error(err, "failed to create operator config")
+		mainLog.Error(err, "failed to create operator config")
 		os.Exit(1)
 	}
 
 	if err := startManager(cfg); err != nil {
-		setupLog.Error(err, "failed to start manager")
+		mainLog.Error(err, "failed to start manager")
 		os.Exit(1)
 	}
 }
@@ -83,28 +83,30 @@ func startManagerWithGracefulShutdown(mgr ctrl.Manager) error {
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	managerCtx, cancelManager := context.WithCancel(context.Background())
-	defer cancelManager()
-
 	managerErrCh := make(chan error, 1)
 	go func() {
-		managerErrCh <- mgr.Start(managerCtx)
+		managerErrCh <- mgr.Start(signalCtx)
 	}()
 
-	setupLog.Info("starting manager")
+	mainLog.Info("starting manager")
 
+	return waitForGracefulShutdown(signalCtx, gracefulShutdownTimeout, managerErrCh)
+}
+
+func waitForGracefulShutdown(ctx context.Context, timeout time.Duration, managerErrCh <-chan error) error {
 	select {
 	case err := <-managerErrCh:
 		if err != nil {
 			return fmt.Errorf("failed to run manager: %w", err)
 		}
 		return nil
-	case <-signalCtx.Done():
-		setupLog.Info("shutdown signal received, stopping manager gracefully")
-		cancelManager()
+	case <-ctx.Done():
+		mainLog.Info("shutdown signal received, stopping manager gracefully")
 	}
 
-	shutdownTimer := time.NewTimer(gracefulShutdownTimeout)
+	// After shutdown was requested, wait for the manager to exit on its own and only
+	// fail if that graceful shutdown exceeds the configured timeout.
+	shutdownTimer := time.NewTimer(timeout)
 	defer shutdownTimer.Stop()
 
 	select {
@@ -112,9 +114,9 @@ func startManagerWithGracefulShutdown(mgr ctrl.Manager) error {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return fmt.Errorf("manager stopped with an error during shutdown: %w", err)
 		}
-		setupLog.Info("manager stopped gracefully")
+		mainLog.Info("manager stopped gracefully")
 		return nil
 	case <-shutdownTimer.C:
-		return fmt.Errorf("graceful shutdown timed out after %s", gracefulShutdownTimeout)
+		return fmt.Errorf("graceful shutdown timed out after %s", timeout)
 	}
 }
