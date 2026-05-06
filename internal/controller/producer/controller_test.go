@@ -45,9 +45,7 @@ func TestControllerReconcileReturnsSuccessForExistingObject(t *testing.T) {
 	result, err := controller.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "example-producer"},
 	})
-	if err != nil {
-		t.Fatalf("Reconcile() returned error: %v", err)
-	}
+	require.NoError(err, "Reconcile() failed")
 
 	if result != (ctrl.Result{}) {
 		t.Fatalf("Reconcile() = %#v, want empty result", result)

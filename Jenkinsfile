@@ -172,7 +172,7 @@ void stageSmokeTest(Makefile makefile) {
     } catch(Exception e) {
         echo "Smoke test failed: ${e}"
         k3d.collectAndArchiveLogs()
-        throw e as java.lang.Throwable
+        throw e
     } finally {
         stage('Remove k3d cluster') {
             k3d.deleteK3d()
