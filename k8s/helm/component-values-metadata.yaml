@@ -1,0 +1,8 @@
+# This file contains mapping information for log levels of this component
+apiVersion: v1
+metavalues:
+  mainLogLevel:
+    name: Log-Level
+    description: The central configuration value to set the log level for this component
+    keys:
+      - path: manager.env.logLevel

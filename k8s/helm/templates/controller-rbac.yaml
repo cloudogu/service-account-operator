@@ -1,0 +1,53 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    {{ include "service-account-operator.labels" . | nindent 4 }}
+  name: {{ include "service-account-operator.fullname" . }}-controller-role
+rules:
+  - apiGroups:
+      - k8s.cloudogu.com
+    resources:
+      - serviceaccountrequests
+      - serviceaccountproducers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - k8s.cloudogu.com
+    resources:
+      - serviceaccountrequests/status
+      - serviceaccountproducers/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - k8s.cloudogu.com
+    resources:
+      - serviceaccountrequests/finalizers
+      - serviceaccountproducers/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    {{ include "service-account-operator.labels" . | nindent 4 }}
+  name: {{ include "service-account-operator.fullname" . }}-controller-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "service-account-operator.fullname" . }}-controller-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "service-account-operator.fullname" . }}
