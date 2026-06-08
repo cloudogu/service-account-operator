@@ -9,8 +9,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+const finalizer = "serviceaccountrequest.k8s.cloudogu.com/finalizer"
 
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
@@ -27,6 +30,15 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	var sare serviceaccountv1.ServiceAccountRequest
 	if err := c.Get(ctx, req.NamespacedName, &sare); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !sare.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, c.handleDeletion(ctx, &sare)
+	}
+
+	if !controllerutil.ContainsFinalizer(&sare, finalizer) {
+		controllerutil.AddFinalizer(&sare, finalizer)
+		return ctrl.Result{}, c.Update(ctx, &sare)
 	}
 
 	producer, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
@@ -48,6 +60,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger.Info("producer found", "producer", producer.Name, "endpoint", producer.Spec.HTTP.Endpoint)
 
 	return ctrl.Result{}, nil
+}
+
+func (c *Controller) handleDeletion(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+	if !controllerutil.ContainsFinalizer(sare, finalizer) {
+		return nil
+	}
+	controllerutil.RemoveFinalizer(sare, finalizer)
+	return c.Update(ctx, sare)
 }
 
 func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv1.ServiceAccountProducer, error) {
