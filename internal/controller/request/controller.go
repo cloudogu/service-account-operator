@@ -7,10 +7,7 @@ import (
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
 	httpclient "github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -23,8 +20,9 @@ import (
 
 const finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
 
-// secretManager writes service account credentials to a Kubernetes Secret.
+// secretManager manages the Kubernetes Secret that holds a service account's credentials.
 type secretManager interface {
+	Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error)
 	CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error)
 }
 
@@ -66,38 +64,28 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	targetSecretName := sare.Name
-	if sare.Spec.SecretRef != nil && sare.Spec.SecretRef.Name != "" {
-		targetSecretName = sare.Spec.SecretRef.Name
+	exists, err := c.secretManager.Exists(ctx, &sare)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
-	exists, err := c.secretExists(ctx, sare.Namespace, targetSecretName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to check for existing secret %q: %w", targetSecretName, err)
-	}
 	if exists {
 		return c.reconcileUpdate(ctx, &sare)
 	}
+
 	return c.reconcileCreate(ctx, &sare)
 }
 
 func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-	sareBefore := sare.DeepCopy()
+	status := newStatusWriter(c.Client, sare)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
-					Type:               serviceaccountv1.ConditionTypeProducerReady,
-					Status:             metav1.ConditionFalse,
-					Reason:             serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
-					Message:            fmt.Sprintf("optional producer %q not found", sare.Spec.Producer),
-					ObservedGeneration: sare.Generation,
-				})
-				return ctrl.Result{}, c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore))
+				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer)
 			}
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
 		}
@@ -106,45 +94,30 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 
 	httpClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
-		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore, err)
+		return ctrl.Result{}, c.fail(ctx, status, err)
 	}
 
-	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, toCreateParams(sare.Spec.Params))
+	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, toParams(sare.Spec.Params))
 	if err != nil {
-		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore,
-			fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore, err)
+		return ctrl.Result{}, c.fail(ctx, status, err)
 	}
 
-	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
-		Type:               serviceaccountv1.ConditionTypeProducerReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             serviceaccountv1.ConditionReasonProducerReadyProducerFound,
-		ObservedGeneration: sare.Generation,
-	})
-	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
-		Type:               serviceaccountv1.ConditionTypeServiceAccountReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             serviceaccountv1.ConditionReasonServiceAccountReadyCreated,
-		ObservedGeneration: sare.Generation,
-	})
 	sare.Status.SecretRef = &serviceaccountv1.LocalSecretRef{Name: secretName}
-	return ctrl.Result{}, c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore))
+	if err := status.producerReady(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, status.serviceAccountReady(ctx)
 }
 
-func (c *Controller) failWithCondition(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, sareBefore *serviceaccountv1.ServiceAccountRequest, err error) error {
-	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
-		Type:               serviceaccountv1.ConditionTypeServiceAccountReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             serviceaccountv1.ConditionReasonServiceAccountReadyFailed,
-		Message:            err.Error(),
-		ObservedGeneration: sare.Generation,
-	})
-	if patchErr := c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore)); patchErr != nil {
+// fail records a failed ServiceAccountReady condition and returns the original
+// error so the reconcile is retried with backoff.
+func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) error {
+	if patchErr := status.serviceAccountFailed(ctx, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
 	return err
@@ -169,18 +142,6 @@ func (c *Controller) reconcileUpdate(_ context.Context, _ *serviceaccountv1.Serv
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) secretExists(ctx context.Context, namespace, name string) (bool, error) {
-	var secret corev1.Secret
-	err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret)
-	if err == nil {
-		return true, nil
-	}
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-	return false, err
-}
-
 func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv1.ServiceAccountProducer, error) {
 	var sapr serviceaccountv1.ServiceAccountProducer
 	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
@@ -189,11 +150,11 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 	return &sapr, nil
 }
 
-func toCreateParams(params *serviceaccountv1.ServiceAccountRequestParams) httpclient.CreateParams {
+func toParams(params *serviceaccountv1.ServiceAccountRequestParams) httpclient.Params {
 	if params == nil {
-		return httpclient.CreateParams{}
+		return httpclient.Params{}
 	}
-	return httpclient.CreateParams{
+	return httpclient.Params{
 		Options: params.Options,
 		Args:    params.Args,
 	}

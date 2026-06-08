@@ -35,6 +35,60 @@ func newTestSARE(name, namespace string) *serviceaccountv1.ServiceAccountRequest
 	}
 }
 
+func TestSecretManager_Exists(t *testing.T) {
+	t.Run("should return false when target secret does not exist", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		exists, err := sm.Exists(context.Background(), sare)
+		if err != nil {
+			t.Fatalf("Exists() returned error: %v", err)
+		}
+		if exists {
+			t.Errorf("exists = true, want false")
+		}
+	})
+
+	t.Run("should return true when target secret exists", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		existing := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+		}
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		exists, err := sm.Exists(context.Background(), sare)
+		if err != nil {
+			t.Fatalf("Exists() returned error: %v", err)
+		}
+		if !exists {
+			t.Errorf("exists = false, want true")
+		}
+	})
+
+	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-creds"}
+		existing := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "custom-creds", Namespace: "ecosystem"},
+		}
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		exists, err := sm.Exists(context.Background(), sare)
+		if err != nil {
+			t.Fatalf("Exists() returned error: %v", err)
+		}
+		if !exists {
+			t.Errorf("exists = false, want true")
+		}
+	})
+}
+
 func TestSecretManager_CreateOrUpdate(t *testing.T) {
 	t.Run("should create secret named after SARE when no secretRef is set", func(t *testing.T) {
 		scheme := newTestScheme(t)

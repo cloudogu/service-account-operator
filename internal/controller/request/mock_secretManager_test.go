@@ -80,6 +80,63 @@ func (_c *mockSecretManager_CreateOrUpdate_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// Exists provides a mock function with given fields: ctx, sare
+func (_m *mockSecretManager) Exists(ctx context.Context, sare *v1.ServiceAccountRequest) (bool, error) {
+	ret := _m.Called(ctx, sare)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Exists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest) (bool, error)); ok {
+		return rf(ctx, sare)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest) bool); ok {
+		r0 = rf(ctx, sare)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.ServiceAccountRequest) error); ok {
+		r1 = rf(ctx, sare)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// mockSecretManager_Exists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exists'
+type mockSecretManager_Exists_Call struct {
+	*mock.Call
+}
+
+// Exists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sare *v1.ServiceAccountRequest
+func (_e *mockSecretManager_Expecter) Exists(ctx interface{}, sare interface{}) *mockSecretManager_Exists_Call {
+	return &mockSecretManager_Exists_Call{Call: _e.mock.On("Exists", ctx, sare)}
+}
+
+func (_c *mockSecretManager_Exists_Call) Run(run func(ctx context.Context, sare *v1.ServiceAccountRequest)) *mockSecretManager_Exists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v1.ServiceAccountRequest))
+	})
+	return _c
+}
+
+func (_c *mockSecretManager_Exists_Call) Return(_a0 bool, _a1 error) *mockSecretManager_Exists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *mockSecretManager_Exists_Call) RunAndReturn(run func(context.Context, *v1.ServiceAccountRequest) (bool, error)) *mockSecretManager_Exists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockSecretManager creates a new instance of mockSecretManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockSecretManager(t interface {

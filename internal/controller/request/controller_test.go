@@ -28,8 +28,16 @@ type mockHTTPClient struct {
 	err         error
 }
 
-func (m *mockHTTPClient) Create(_ context.Context, _ string, _ httpclient.CreateParams) (map[string]string, error) {
+func (m *mockHTTPClient) Create(_ context.Context, _ string, _ httpclient.Params) (map[string]string, error) {
 	return m.credentials, m.err
+}
+
+func (m *mockHTTPClient) Update(_ context.Context, _ string, _ httpclient.Params) (map[string]string, error) {
+	return m.credentials, m.err
+}
+
+func (m *mockHTTPClient) Delete(_ context.Context, _ string) error {
+	return m.err
 }
 
 // --- helpers ---
@@ -274,6 +282,7 @@ func TestController_Reconcile(t *testing.T) {
 		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
 
 		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(mock.Anything, mock.Anything).Return(false, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(mock.Anything, mock.Anything, mock.Anything).Return("grafana-to-prometheus", nil)
 
 		controller := New(rtClient, scheme)
