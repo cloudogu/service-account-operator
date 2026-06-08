@@ -42,26 +42,38 @@ func (s *statusWriter) set(condType string, status metav1.ConditionStatus, reaso
 func (s *statusWriter) producerReady(ctx context.Context) error {
 	s.set(serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionTrue,
 		serviceaccountv1.ConditionReasonProducerReadyProducerFound, "")
-	return s.persist(ctx)
+	if err := s.persist(ctx); err != nil {
+		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeProducerReady, err)
+	}
+	return nil
 }
 
 func (s *statusWriter) producerNotFound(ctx context.Context, producer string) error {
 	s.set(serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionFalse,
 		serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
 		fmt.Sprintf("producer %q not found", producer))
-	return s.persist(ctx)
+	if err := s.persist(ctx); err != nil {
+		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeProducerReady, err)
+	}
+	return nil
 }
 
 func (s *statusWriter) serviceAccountReady(ctx context.Context) error {
 	s.set(serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionTrue,
 		serviceaccountv1.ConditionReasonServiceAccountReadyCreated, "")
-	return s.persist(ctx)
+	if err := s.persist(ctx); err != nil {
+		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeServiceAccountReady, err)
+	}
+	return nil
 }
 
 func (s *statusWriter) serviceAccountFailed(ctx context.Context, err error) error {
 	s.set(serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
 		serviceaccountv1.ConditionReasonServiceAccountReadyFailed, err.Error())
-	return s.persist(ctx)
+	if patchErr := s.persist(ctx); patchErr != nil {
+		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeServiceAccountReady, patchErr)
+	}
+	return nil
 }
 
 // persist patches the status subresource with the buffered condition changes and advances

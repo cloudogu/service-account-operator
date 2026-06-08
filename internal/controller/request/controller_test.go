@@ -180,6 +180,22 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, ctrl.Result{}, result)
 	})
 
+	t.Run("should return wrapped error when secretManager.Exists fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(mock.Anything, mock.Anything).Return(false, errors.New("storage error"))
+		controller := New(rtClient, scheme)
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to check if service account secret exists for")
+		assert.Contains(t, err.Error(), "grafana-to-prometheus")
+	})
+
 	t.Run("should return empty result and set ProducerReady=False for optional SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", true)

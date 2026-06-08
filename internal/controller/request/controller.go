@@ -66,7 +66,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	exists, err := c.secretManager.Exists(ctx, &sare)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
 	}
 
 	if exists {
@@ -87,31 +87,38 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
 				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer)
 			}
+
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
 		}
+
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
 	httpClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, err)
+		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, toParams(sare.Spec.Params))
+	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, httpclient.NewParamsFromSpec(sare.Spec.Params))
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, err)
+		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
 	}
 
 	sare.Status.SecretRef = &serviceaccountv1.LocalSecretRef{Name: secretName}
 	if err := status.producerReady(ctx); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
-	return ctrl.Result{}, status.serviceAccountReady(ctx)
+
+	if err := status.serviceAccountReady(ctx); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // fail records a failed ServiceAccountReady condition and returns the original
@@ -120,6 +127,7 @@ func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) 
 	if patchErr := status.serviceAccountFailed(ctx, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
+
 	return err
 }
 
@@ -127,18 +135,25 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}
+
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
 		return err
 	}
 	controllerutil.RemoveFinalizer(sare, finalizer)
-	return c.Update(ctx, sare)
-}
+	if err := c.Update(ctx, sare); err != nil {
+		return fmt.Errorf("failed to remove finalizer from service account request %q: %w", sare.Name, err)
+	}
 
-func (c *Controller) deleteServiceAccount(_ context.Context, _ *serviceaccountv1.ServiceAccountRequest) error {
 	return nil
 }
 
-func (c *Controller) reconcileUpdate(_ context.Context, _ *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+	logf.FromContext(ctx).Info("delete not yet implemented, skipping", "serviceAccountRequest", sare.Name)
+	return nil
+}
+
+func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
 	return ctrl.Result{}, nil
 }
 
@@ -147,17 +162,8 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
 		return nil, err
 	}
-	return &sapr, nil
-}
 
-func toParams(params *serviceaccountv1.ServiceAccountRequestParams) httpclient.Params {
-	if params == nil {
-		return httpclient.Params{}
-	}
-	return httpclient.Params{
-		Options: params.Options,
-		Args:    params.Args,
-	}
+	return &sapr, nil
 }
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
@@ -191,5 +197,6 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 			})
 		}
 	}
+
 	return requests
 }
