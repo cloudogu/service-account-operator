@@ -9,6 +9,8 @@ import (
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -84,13 +86,21 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+	sareBefore := sare.DeepCopy()
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, nil
+				apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
+					Type:               serviceaccountv1.ConditionTypeProducerReady,
+					Status:             metav1.ConditionFalse,
+					Reason:             serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
+					Message:            fmt.Sprintf("optional producer %q not found", sare.Spec.Producer),
+					ObservedGeneration: sare.Generation,
+				})
+				return ctrl.Result{}, c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore))
 			}
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
 		}
@@ -99,22 +109,48 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 
 	httpClient, err := c.buildHTTPClient(ctx, sare.Namespace, sapr)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore, err)
 	}
 
 	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, toCreateParams(sare.Spec.Params))
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err)
+		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore,
+			fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore, err)
 	}
 
-	sareBefore := sare.DeepCopy()
+	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
+		Type:               serviceaccountv1.ConditionTypeProducerReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             serviceaccountv1.ConditionReasonProducerReadyProducerFound,
+		ObservedGeneration: sare.Generation,
+	})
+	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
+		Type:               serviceaccountv1.ConditionTypeServiceAccountReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             serviceaccountv1.ConditionReasonServiceAccountReadyCreated,
+		ObservedGeneration: sare.Generation,
+	})
 	sare.Status.SecretRef = &serviceaccountv1.LocalSecretRef{Name: secretName}
 	return ctrl.Result{}, c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore))
+}
+
+func (c *Controller) failWithCondition(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, sareBefore *serviceaccountv1.ServiceAccountRequest, err error) error {
+	apimeta.SetStatusCondition(&sare.Status.Conditions, metav1.Condition{
+		Type:               serviceaccountv1.ConditionTypeServiceAccountReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             serviceaccountv1.ConditionReasonServiceAccountReadyFailed,
+		Message:            err.Error(),
+		ObservedGeneration: sare.Generation,
+	})
+	if patchErr := c.Status().Patch(ctx, sare, client.MergeFrom(sareBefore)); patchErr != nil {
+		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
+	}
+	return err
 }
 
 func (c *Controller) buildHTTPClient(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (httpclient.HTTPClient, error) {

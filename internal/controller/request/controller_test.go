@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -84,6 +85,10 @@ func newAuthSecret(name, namespace, key, value string) *corev1.Secret {
 
 func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
+}
+
+func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	return apimeta.FindStatusCondition(conditions, condType)
 }
 
 // --- tests ---
@@ -174,13 +179,24 @@ func TestController_Reconcile(t *testing.T) {
 	t.Run("should return empty result for optional SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", true)
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
 		controller := New(rtClient, scheme)
 
 		result, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv1.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerNotFound, cond.Reason)
 	})
 
 	t.Run("should return error for required SARE when producer is not found", func(t *testing.T) {
@@ -286,5 +302,15 @@ func TestController_Reconcile(t *testing.T) {
 		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
 		require.NotNil(t, updated.Status.SecretRef)
 		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
+
+		readyCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, readyCond)
+		assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, readyCond.Reason)
+
+		producerCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
+		require.NotNil(t, producerCond)
+		assert.Equal(t, metav1.ConditionTrue, producerCond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerFound, producerCond.Reason)
 	})
 }
