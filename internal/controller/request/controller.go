@@ -28,29 +28,24 @@ type secretManager interface {
 	CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error)
 }
 
-// httpClientFactory creates HTTPClient instances bound to a specific producer endpoint.
-type httpClientFactory interface {
-	New(endpoint, apiKey string) httpclient.HTTPClient
-}
-
-type defaultHTTPClientFactory struct{}
-
-func (f *defaultHTTPClientFactory) New(endpoint, apiKey string) httpclient.HTTPClient {
-	return httpclient.NewHTTPClient(endpoint, apiKey)
+// producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
+// resolving the API key from the referenced Kubernetes Secret.
+type producerClientFactory interface {
+	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (httpclient.HTTPClient, error)
 }
 
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
 	client.Client
-	secretManager     secretManager
-	httpClientFactory httpClientFactory
+	secretManager         secretManager
+	producerClientFactory producerClientFactory
 }
 
 func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
 	return &Controller{
-		Client:            rtClient,
-		secretManager:     sa.NewSecretManager(rtClient, scheme),
-		httpClientFactory: &defaultHTTPClientFactory{},
+		Client:                rtClient,
+		secretManager:         sa.NewSecretManager(rtClient, scheme),
+		producerClientFactory: &defaultProducerClientFactory{rtClient: rtClient},
 	}
 }
 
@@ -109,7 +104,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
-	httpClient, err := c.buildHTTPClient(ctx, sare.Namespace, sapr)
+	httpClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
 		return ctrl.Result{}, c.failWithCondition(ctx, sare, sareBefore, err)
 	}
@@ -155,17 +150,6 @@ func (c *Controller) failWithCondition(ctx context.Context, sare *serviceaccount
 	return err
 }
 
-func (c *Controller) buildHTTPClient(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (httpclient.HTTPClient, error) {
-	if sapr.Spec.HTTP == nil {
-		return nil, fmt.Errorf("producer %q has no HTTP spec configured", sapr.Name)
-	}
-	apiKey, err := c.getAPIKey(ctx, namespace, sapr.Spec.HTTP.AuthSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get API key for producer %q: %w", sapr.Name, err)
-	}
-	return c.httpClientFactory.New(sapr.Spec.HTTP.Endpoint, apiKey), nil
-}
-
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
@@ -203,18 +187,6 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 		return nil, err
 	}
 	return &sapr, nil
-}
-
-func (c *Controller) getAPIKey(ctx context.Context, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
-	var secret corev1.Secret
-	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: authSecret.Name}, &secret); err != nil {
-		return "", fmt.Errorf("failed to get auth secret %q: %w", authSecret.Name, err)
-	}
-	apiKey, ok := secret.Data[authSecret.Key]
-	if !ok {
-		return "", fmt.Errorf("auth secret %q does not contain key %q", authSecret.Name, authSecret.Key)
-	}
-	return string(apiKey), nil
 }
 
 func toCreateParams(params *serviceaccountv1.ServiceAccountRequestParams) httpclient.CreateParams {

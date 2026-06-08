@@ -76,13 +76,6 @@ func newTestSAPR(name, namespace, endpoint string) *serviceaccountv1.ServiceAcco
 	}
 }
 
-func newAuthSecret(name, namespace, key, value string) *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Data:       map[string][]byte{key: []byte(value)},
-	}
-}
-
 func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
 }
@@ -91,6 +84,9 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 	return apimeta.FindStatusCondition(conditions, condType)
 }
 
+// newMockedController creates a Controller with mocked dependencies for unit testing.
+// Tests that exercise the full producer-client path (auth secret lookup etc.) should
+// use newTestSAPR + a real client instead — see producer_client_factory_test.go.
 // --- tests ---
 
 func TestController_Reconcile(t *testing.T) {
@@ -149,15 +145,15 @@ func TestController_Reconcile(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
 		}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existingSecret).Build()
-		httpFactoryMock := newMockHttpClientFactory(t)
+		factoryMock := newMockProducerClientFactory(t)
 		controller := New(rtClient, scheme)
-		controller.httpClientFactory = httpFactoryMock
+		controller.producerClientFactory = factoryMock
 
 		result, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
-		httpFactoryMock.AssertNotCalled(t, "New")
+		factoryMock.AssertNotCalled(t, "NewForProducer")
 	})
 
 	t.Run("should skip reconcile when custom secretRef target already exists in cluster", func(t *testing.T) {
@@ -176,7 +172,7 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, ctrl.Result{}, result)
 	})
 
-	t.Run("should return empty result for optional SARE when producer is not found", func(t *testing.T) {
+	t.Run("should return empty result and set ProducerReady=False for optional SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", true)
 		rtClient := fake.NewClientBuilder().
@@ -210,87 +206,78 @@ func TestController_Reconcile(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("should return error when producer has no HTTP spec", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
-		sapr := &serviceaccountv1.ServiceAccountProducer{
-			ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
-			Spec: serviceaccountv1.ServiceAccountProducerSpec{
-				Producer: "prometheus",
-				Exec:     &serviceaccountv1.ExecProducer{Command: "/create-sa.sh", Selector: metav1.LabelSelector{}},
-			},
-		}
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, sapr).Build()
-		controller := New(rtClient, scheme)
-
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.Error(t, err)
-	})
-
-	t.Run("should return error when auth secret is not found", func(t *testing.T) {
+	t.Run("should return error and set ServiceAccountReady=False when factory fails to build client", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, sapr).Build()
-		controller := New(rtClient, scheme)
-
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.Error(t, err)
-	})
-
-	t.Run("should return error when auth secret is missing the expected key", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
-		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
-		authSecret := newAuthSecret("prometheus-sa-secret", "ecosystem", "wrongKey", "token")
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, sapr, authSecret).Build()
-		controller := New(rtClient, scheme)
-
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.Error(t, err)
-	})
-
-	t.Run("should return error when HTTP client fails", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
-		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
-		authSecret := newAuthSecret("prometheus-sa-secret", "ecosystem", "apiKey", "secret-token")
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, sapr, authSecret).Build()
-
-		httpClientMock := &mockHTTPClient{err: errors.New("connection refused")}
-		httpFactoryMock := newMockHttpClientFactory(t)
-		httpFactoryMock.EXPECT().New(mock.Anything, mock.Anything).Return(httpClientMock)
-		controller := New(rtClient, scheme)
-		controller.httpClientFactory = httpFactoryMock
-
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.Error(t, err)
-	})
-
-	t.Run("should create secret and update status on success", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
-		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
-		authSecret := newAuthSecret("prometheus-sa-secret", "ecosystem", "apiKey", "secret-token")
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(sare, sapr, authSecret).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
+
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("auth secret not found"))
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		var updated serviceaccountv1.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyFailed, cond.Reason)
+	})
+
+	t.Run("should return error and set ServiceAccountReady=False when HTTP client fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
+
+		httpClientMock := &mockHTTPClient{err: errors.New("connection refused")}
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		var updated serviceaccountv1.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	})
+
+	t.Run("should create secret and update status with Ready conditions on success", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
 			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := &mockHTTPClient{credentials: map[string]string{"username": "grafana-user", "password": "pass"}}
-		httpFactoryMock := newMockHttpClientFactory(t)
-		httpFactoryMock.EXPECT().New(mock.Anything, mock.Anything).Return(httpClientMock)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
 
 		secretMgrMock := newMockSecretManager(t)
 		secretMgrMock.EXPECT().CreateOrUpdate(mock.Anything, mock.Anything, mock.Anything).Return("grafana-to-prometheus", nil)
 
 		controller := New(rtClient, scheme)
-		controller.httpClientFactory = httpFactoryMock
+		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
 
 		result, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -303,10 +290,10 @@ func TestController_Reconcile(t *testing.T) {
 		require.NotNil(t, updated.Status.SecretRef)
 		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
 
-		readyCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
-		require.NotNil(t, readyCond)
-		assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, readyCond.Reason)
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 
 		producerCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
 		require.NotNil(t, producerCond)
