@@ -314,3 +314,46 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerFound, producerCond.Reason)
 	})
 }
+
+func TestController_EnqueueRequestsForProducer(t *testing.T) {
+	t.Run("should enqueue SAREs that reference the given producer", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare1 := newTestSARE("grafana-to-prometheus", "ecosystem", "prometheus", true)
+		sare2 := newTestSARE("loki-to-prometheus", "ecosystem", "prometheus", true)
+		sare3 := newTestSARE("grafana-to-alertmanager", "ecosystem", "alertmanager", false)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare1, sare2, sare3).Build()
+		controller := New(rtClient, scheme)
+
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		requests := controller.enqueueRequestsForProducer(context.Background(), sapr)
+
+		require.Len(t, requests, 2)
+		names := []string{requests[0].Name, requests[1].Name}
+		assert.Contains(t, names, "grafana-to-prometheus")
+		assert.Contains(t, names, "loki-to-prometheus")
+	})
+
+	t.Run("should return empty list when no SAREs reference the producer", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-alertmanager", "ecosystem", "alertmanager", false)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		controller := New(rtClient, scheme)
+
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		requests := controller.enqueueRequestsForProducer(context.Background(), sapr)
+
+		assert.Empty(t, requests)
+	})
+
+	t.Run("should not enqueue SAREs from a different namespace", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "other-namespace", "prometheus", true)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		controller := New(rtClient, scheme)
+
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		requests := controller.enqueueRequestsForProducer(context.Background(), sapr)
+
+		assert.Empty(t, requests)
+	})
+}

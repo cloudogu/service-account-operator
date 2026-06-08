@@ -16,7 +16,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
@@ -228,6 +230,33 @@ func toCreateParams(params *serviceaccountv1.ServiceAccountRequestParams) httpcl
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&serviceaccountv1.ServiceAccountRequest{}).
+		Watches(
+			&serviceaccountv1.ServiceAccountProducer{},
+			handler.EnqueueRequestsFromMapFunc(c.enqueueRequestsForProducer),
+		).
 		Named("serviceaccountrequest").
 		Complete(c)
+}
+
+// enqueueRequestsForProducer maps a ServiceAccountProducer event to all SAREs in the same
+// namespace that reference this producer, so optional SAREs are re-reconciled once their
+// producer becomes available.
+func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := logf.FromContext(ctx).WithValues("producer", obj.GetName())
+
+	var sareList serviceaccountv1.ServiceAccountRequestList
+	if err := c.List(ctx, &sareList, client.InNamespace(obj.GetNamespace())); err != nil {
+		logger.Error(err, "failed to list service account requests for producer event")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, sare := range sareList.Items {
+		if sare.Spec.Producer == obj.GetName() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Namespace: sare.Namespace, Name: sare.Name},
+			})
+		}
+	}
+	return requests
 }
