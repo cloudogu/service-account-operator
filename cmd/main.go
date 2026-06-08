@@ -58,7 +58,7 @@ func startManager(cfg *config.OperatorConfig) error {
 		return fmt.Errorf("failed to create manager: %w", err)
 	}
 
-	serviceAccountRequestController := request.New(mgr.GetClient())
+	serviceAccountRequestController := request.New(mgr.GetClient(), mgr.GetScheme())
 	if err := serviceAccountRequestController.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("failed to create service account request controller: %w", err)
 	}
