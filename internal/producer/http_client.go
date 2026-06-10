@@ -54,6 +54,7 @@ type credentialRequestBody struct {
 	Params credentialParamsBody `json:"params,omitempty"`
 }
 
+// TODO this structure does not reflect the current API -> consumer:string, params:[]string
 type credentialParamsBody struct {
 	Options map[string][]string `json:"options,omitempty"`
 	Args    []string            `json:"args,omitempty"`
