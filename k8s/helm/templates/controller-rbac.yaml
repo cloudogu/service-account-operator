@@ -23,6 +23,8 @@ rules:
       - get
       - create
       - update
+      - list
+      - watch
   - apiGroups:
       - k8s.cloudogu.com
     resources:

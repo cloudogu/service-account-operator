@@ -1,5 +1,6 @@
 package request
 
+// TODO Wieso liegt die ProducerFactory im request package?
 import (
 	"context"
 	"fmt"

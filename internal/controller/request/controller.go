@@ -34,6 +34,7 @@ type producerClientFactory interface {
 
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
+	// TODO no need to export the client
 	client.Client
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
@@ -61,6 +62,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if err := c.Update(ctx, &sare); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to add finalizer to service account request %q: %w", sare.Name, err)
 		}
+		// TODO This cannot work. Either continue the reconciliation or return result with requeue.
 		return ctrl.Result{}, nil
 	}
 
@@ -74,6 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	return c.reconcileCreate(ctx, &sare)
+	// TODO Do we need to restart the consumer if the serviceaccount is optional?
 }
 
 func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
@@ -94,6 +97,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
+	// TODO rename to serviceAccountClient
 	httpClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
@@ -136,6 +140,7 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 		return nil
 	}
 
+	// TODO Persistent error during service account deletion freezes the cr. This could be annoying during cleanups.
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 )
 
 // SecretManager manages the Kubernetes Secret that holds a service account's credentials.
+// TODO interface kann gelöscht werden? Return concrete types
 type SecretManager interface {
 	// Exists reports whether the target Secret for the given SARE already exists in the cluster.
 	Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error)
@@ -47,6 +48,7 @@ func (sm *secretManager) Exists(ctx context.Context, sare *serviceaccountv1.Serv
 	var secret corev1.Secret
 	err := sm.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: name}, &secret)
 	if err == nil {
+		// TODO should we check if the secret has a specific label? To avoid conflicts with other secrets.
 		return true, nil
 	}
 	if apierrors.IsNotFound(err) {

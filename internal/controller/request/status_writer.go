@@ -48,6 +48,8 @@ func (s *statusWriter) producerReady(ctx context.Context) error {
 	return nil
 }
 
+// TODO Könnte man hier nicht auch den eigentlichen Error mitliefern? Wie bei serviceAccountFailed
+// TODO Den Rumpf der Methode kann man auslagern.
 func (s *statusWriter) producerNotFound(ctx context.Context, producer string) error {
 	s.set(serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionFalse,
 		serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
