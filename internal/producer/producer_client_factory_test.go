@@ -1,4 +1,4 @@
-package request
+package producer
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -19,11 +20,35 @@ func newAuthSecret(name, namespace, key, value string) *corev1.Secret {
 	}
 }
 
+func newTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+	return scheme
+}
+
+func newTestSAPR(name, namespace, endpoint string) *serviceaccountv1.ServiceAccountProducer {
+	return &serviceaccountv1.ServiceAccountProducer{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: serviceaccountv1.ServiceAccountProducerSpec{
+			Producer: name,
+			HTTP: &serviceaccountv1.HTTPProducer{
+				Endpoint: endpoint,
+				AuthSecret: serviceaccountv1.ServiceAccountProducerAuthSecret{
+					LocalSecretRef: serviceaccountv1.LocalSecretRef{Name: "prometheus-sa-secret"},
+					Key:            "apiKey",
+				},
+			},
+		},
+	}
+}
+
 func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 	t.Run("should return error when producer has no HTTP spec", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		factory := &defaultProducerClientFactory{rtClient: rtClient}
+		factory := &DefaultProducerClientFactory{rtClient: rtClient}
 
 		sapr := &serviceaccountv1.ServiceAccountProducer{
 			ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
@@ -42,7 +67,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 	t.Run("should return error when auth secret is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		factory := &defaultProducerClientFactory{rtClient: rtClient}
+		factory := &DefaultProducerClientFactory{rtClient: rtClient}
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 
@@ -56,7 +81,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 		scheme := newTestScheme(t)
 		authSecret := newAuthSecret("prometheus-sa-secret", "ecosystem", "wrongKey", "token")
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(authSecret).Build()
-		factory := &defaultProducerClientFactory{rtClient: rtClient}
+		factory := &DefaultProducerClientFactory{rtClient: rtClient}
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 
@@ -70,7 +95,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 		scheme := newTestScheme(t)
 		authSecret := newAuthSecret("prometheus-sa-secret", "ecosystem", "apiKey", "secret-token")
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(authSecret).Build()
-		factory := &defaultProducerClientFactory{rtClient: rtClient}
+		factory := &DefaultProducerClientFactory{rtClient: rtClient}
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 

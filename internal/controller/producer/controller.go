@@ -18,10 +18,6 @@ func New(rtClient client.Client) *Controller {
 	return &Controller{Client: rtClient}
 }
 
-// TODO Do we need these annotations?
-// +kubebuilder:rbac:groups=k8s.cloudogu.com,resources=serviceaccountproducers,verbs=get;list;watch
-// +kubebuilder:rbac:groups=k8s.cloudogu.com,resources=serviceaccountproducers/status,verbs=get
-
 // Reconcile keeps the current implementation intentionally side-effect free.
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountProducer", req.NamespacedName)
@@ -30,7 +26,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := c.Get(ctx, req.NamespacedName, &serviceAccountProducer); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	// TODO validate if producer ships netpol for the operator?
 	// TODO Check if producer is ready
 	// TODO Check periodically if it is ready
 

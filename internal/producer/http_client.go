@@ -22,11 +22,8 @@ type Params struct {
 	Args    []string
 }
 
-// HTTPClient manages service accounts on a specific producer via HTTP.
-// The producer endpoint implements PUT (create), POST (update) and DELETE (delete)
-// on {endpoint}/{consumer}, see ADR-0015.
-// TODO Das Interface sollte da liegen, wo es verwendet wird. Außerdem enthält es technische Details (HTTP) die durch das Interface gekapselt werden sollten.
-type HTTPClient interface {
+// ServiceAccountClient manages service accounts on a specific producer.
+type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Update re-provisions an existing service account and returns the refreshed credentials.
@@ -35,15 +32,15 @@ type HTTPClient interface {
 	Delete(ctx context.Context, consumer string) error
 }
 
-type httpClient struct {
+type HttpClient struct {
 	client   *http.Client
 	endpoint string
 	apiKey   string
 }
 
 // NewHTTPClient creates an HTTPClient bound to a specific producer endpoint and API key.
-func NewHTTPClient(endpoint, apiKey string) HTTPClient {
-	return &httpClient{
+func NewHTTPClient(endpoint, apiKey string) *HttpClient {
+	return &HttpClient{
 		client:   &http.Client{Timeout: defaultTimeout},
 		endpoint: endpoint,
 		apiKey:   apiKey,
@@ -66,17 +63,17 @@ type credentialResponseBody struct {
 
 // Create calls PUT {endpoint}/{consumer} to create a service account and returns the credentials.
 // TODO PUT ist idempotent und sollte für Updates verwendet werden. POST für Create.
-func (c *httpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
+func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	return c.credentialRequest(ctx, http.MethodPost, consumer, params, http.StatusCreated)
 }
 
 // Update calls POST {endpoint}/{consumer} to re-provision a service account and returns the refreshed credentials.
-func (c *httpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
+func (c *HttpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	return c.credentialRequest(ctx, http.MethodPut, consumer, params, http.StatusOK)
 }
 
 // Delete calls DELETE {endpoint}/{consumer} to remove a service account.
-func (c *httpClient) Delete(ctx context.Context, consumer string) error {
+func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 	targetURL, err := c.consumerURL(consumer)
 	if err != nil {
 		return err
@@ -105,7 +102,7 @@ func (c *httpClient) Delete(ctx context.Context, consumer string) error {
 }
 
 // credentialRequest performs a create/update request that sends params and returns credentials.
-func (c *httpClient) credentialRequest(ctx context.Context, method, consumer string, params Params, expectedStatus int) (map[string]string, error) {
+func (c *HttpClient) credentialRequest(ctx context.Context, method, consumer string, params Params, expectedStatus int) (map[string]string, error) {
 	targetURL, err := c.consumerURL(consumer)
 	if err != nil {
 		return nil, err
@@ -151,7 +148,7 @@ func (c *httpClient) credentialRequest(ctx context.Context, method, consumer str
 
 // TODO Kann es hier zukünftig für Multi-CES Probleme geben? Consumer == ehemaliger Service. Was ist wenn mehrere Grafana-Dogus von einem zentrale Prometheus SAs beantragen?
 // TODO Außerdem: benötigt POST PATH Parameter?
-func (c *httpClient) consumerURL(consumer string) (string, error) {
+func (c *HttpClient) consumerURL(consumer string) (string, error) {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
 		return "", fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)

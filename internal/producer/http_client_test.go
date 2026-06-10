@@ -10,13 +10,13 @@ import (
 )
 
 func TestHTTPClient_Create(t *testing.T) {
-	t.Run("should send PUT request and return credentials on success", func(t *testing.T) {
+	t.Run("should send POST request and return credentials on success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPut {
-				t.Errorf("method = %q, want PUT", r.Method)
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %q, want POST", r.Method)
 			}
-			if r.URL.Path != "/grafana" {
-				t.Errorf("path = %q, want /grafana", r.URL.Path)
+			if r.URL.Path != "/" {
+				t.Errorf("path = %q, want /", r.URL.Path)
 			}
 			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
 				t.Errorf("%s header = %q, want %q", apiKeyHeader, got, "test-api-key")
@@ -114,10 +114,10 @@ func TestHTTPClient_Create(t *testing.T) {
 }
 
 func TestHTTPClient_Update(t *testing.T) {
-	t.Run("should send POST request and return refreshed credentials on success", func(t *testing.T) {
+	t.Run("should send OUT request and return refreshed credentials on success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Errorf("method = %q, want POST", r.Method)
+			if r.Method != http.MethodPut {
+				t.Errorf("method = %q, want PUT", r.Method)
 			}
 			if r.URL.Path != "/grafana" {
 				t.Errorf("path = %q, want /grafana", r.URL.Path)

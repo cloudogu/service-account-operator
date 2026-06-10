@@ -1,22 +1,24 @@
-package request
+package producer
 
-// TODO Wieso liegt die ProducerFactory im request package?
 import (
 	"context"
 	"fmt"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
-	httpclient "github.com/cloudogu/service-account-operator/internal/producer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type defaultProducerClientFactory struct {
+type DefaultProducerClientFactory struct {
 	rtClient client.Client
 }
 
-func (f *defaultProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (httpclient.HTTPClient, error) {
+func NewProducerClientFactory(rtClient client.Client) *DefaultProducerClientFactory {
+	return &DefaultProducerClientFactory{rtClient: rtClient}
+}
+
+func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (ServiceAccountClient, error) {
 	if sapr.Spec.HTTP == nil {
 		return nil, fmt.Errorf("producer %q has no HTTP spec configured", sapr.Name)
 	}
@@ -26,10 +28,10 @@ func (f *defaultProducerClientFactory) NewForProducer(ctx context.Context, names
 		return nil, fmt.Errorf("failed to get API key for producer %q: %w", sapr.Name, err)
 	}
 
-	return httpclient.NewHTTPClient(sapr.Spec.HTTP.Endpoint, apiKey), nil
+	return NewHTTPClient(sapr.Spec.HTTP.Endpoint, apiKey), nil
 }
 
-func (f *defaultProducerClientFactory) getAPIKey(ctx context.Context, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
+func (f *DefaultProducerClientFactory) getAPIKey(ctx context.Context, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
 	var secret corev1.Secret
 	if err := f.rtClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: authSecret.Name}, &secret); err != nil {
 		return "", fmt.Errorf("failed to get auth secret %q: %w", authSecret.Name, err)

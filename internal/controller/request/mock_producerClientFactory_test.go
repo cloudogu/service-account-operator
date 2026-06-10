@@ -24,23 +24,23 @@ func (_m *mockProducerClientFactory) EXPECT() *mockProducerClientFactory_Expecte
 }
 
 // NewForProducer provides a mock function with given fields: ctx, namespace, sapr
-func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *v1.ServiceAccountProducer) (producer.HTTPClient, error) {
+func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error) {
 	ret := _m.Called(ctx, namespace, sapr)
 
 	if len(ret) == 0 {
 		panic("no return value specified for NewForProducer")
 	}
 
-	var r0 producer.HTTPClient
+	var r0 producer.ServiceAccountClient
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) (producer.HTTPClient, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error)); ok {
 		return rf(ctx, namespace, sapr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) producer.HTTPClient); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) producer.ServiceAccountClient); ok {
 		r0 = rf(ctx, namespace, sapr)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(producer.HTTPClient)
+			r0 = ret.Get(0).(producer.ServiceAccountClient)
 		}
 	}
 
@@ -73,12 +73,12 @@ func (_c *mockProducerClientFactory_NewForProducer_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *mockProducerClientFactory_NewForProducer_Call) Return(_a0 producer.HTTPClient, _a1 error) *mockProducerClientFactory_NewForProducer_Call {
+func (_c *mockProducerClientFactory_NewForProducer_Call) Return(_a0 producer.ServiceAccountClient, _a1 error) *mockProducerClientFactory_NewForProducer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *mockProducerClientFactory_NewForProducer_Call) RunAndReturn(run func(context.Context, string, *v1.ServiceAccountProducer) (producer.HTTPClient, error)) *mockProducerClientFactory_NewForProducer_Call {
+func (_c *mockProducerClientFactory_NewForProducer_Call) RunAndReturn(run func(context.Context, string, *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error)) *mockProducerClientFactory_NewForProducer_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
-	httpclient "github.com/cloudogu/service-account-operator/internal/producer"
+	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +29,13 @@ type secretManager interface {
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
 // resolving the API key from the referenced Kubernetes Secret.
 type producerClientFactory interface {
-	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (httpclient.HTTPClient, error)
+	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (producer.ServiceAccountClient, error)
+}
+
+// serviceAccountClient manages service accounts on a specific producer.
+// Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
+type serviceAccountClient interface {
+	producer.ServiceAccountClient
 }
 
 // Controller reconciles ServiceAccountRequest resources.
@@ -44,7 +50,7 @@ func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
 	return &Controller{
 		Client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
-		producerClientFactory: &defaultProducerClientFactory{rtClient: rtClient},
+		producerClientFactory: producer.NewProducerClientFactory(rtClient),
 	}
 }
 
@@ -97,13 +103,12 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
-	// TODO rename to serviceAccountClient
-	httpClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
+	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := httpClient.Create(ctx, sare.Spec.Consumer, httpclient.NewParamsFromSpec(sare.Spec.Params))
+	credentials, err := saClient.Create(ctx, sare.Spec.Consumer, producer.NewParamsFromSpec(sare.Spec.Params))
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
