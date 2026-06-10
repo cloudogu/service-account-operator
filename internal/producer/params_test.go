@@ -8,29 +8,25 @@ import (
 )
 
 func TestNewParamsFromSpec(t *testing.T) {
-	t.Run("should return zero-value Params for nil spec", func(t *testing.T) {
+	t.Run("should return nil for nil spec", func(t *testing.T) {
 		result := NewParamsFromSpec(nil)
 
-		assert.Empty(t, result.Options)
-		assert.Empty(t, result.Args)
+		assert.Nil(t, result)
 	})
 
-	t.Run("should map options and args from spec", func(t *testing.T) {
+	t.Run("should map args from spec", func(t *testing.T) {
 		spec := &serviceaccountv1.ServiceAccountRequestParams{
-			Options: map[string][]string{"role": {"admin", "viewer"}},
-			Args:    []string{"--verbose"},
+			Args: []string{"--verbose", "--format=json"},
 		}
 
 		result := NewParamsFromSpec(spec)
 
-		assert.Equal(t, spec.Options, result.Options)
-		assert.Equal(t, spec.Args, result.Args)
+		assert.Equal(t, Params{"--verbose", "--format=json"}, result)
 	})
 
-	t.Run("should return zero-value Params for empty spec", func(t *testing.T) {
+	t.Run("should return nil for empty spec", func(t *testing.T) {
 		result := NewParamsFromSpec(&serviceaccountv1.ServiceAccountRequestParams{})
 
-		assert.Empty(t, result.Options)
-		assert.Empty(t, result.Args)
+		assert.Nil(t, result)
 	})
 }

@@ -94,7 +94,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		if apierrors.IsNotFound(err) {
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer)
+				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer, err)
 			}
 
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
@@ -108,7 +108,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.Create(ctx, sare.Spec.Consumer, producer.NewParamsFromSpec(sare.Spec.Params))
+	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), producer.NewParamsFromSpec(sare.Spec.Params))
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
@@ -209,4 +209,10 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 	}
 
 	return requests
+}
+
+// qualifiedConsumer returns a namespace-qualified consumer name to ensure uniqueness across namespaces.
+// For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
+func qualifiedConsumer(sare *serviceaccountv1.ServiceAccountRequest) string {
+	return sare.Spec.Consumer + "-" + sare.Namespace
 }

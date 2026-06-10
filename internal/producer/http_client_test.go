@@ -10,7 +10,7 @@ import (
 )
 
 func TestHTTPClient_Create(t *testing.T) {
-	t.Run("should send POST request and return credentials on success", func(t *testing.T) {
+	t.Run("should send POST with consumer and params in body and return credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				t.Errorf("method = %q, want POST", r.Method)
@@ -19,35 +19,32 @@ func TestHTTPClient_Create(t *testing.T) {
 				t.Errorf("path = %q, want /", r.URL.Path)
 			}
 			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s header = %q, want %q", apiKeyHeader, got, "test-api-key")
+				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
 			}
 			if got := r.Header.Get("Content-Type"); got != "application/json" {
 				t.Errorf("Content-Type = %q, want application/json", got)
 			}
 
 			body, _ := io.ReadAll(r.Body)
-			var req credentialRequestBody
+			var req createRequestBody
 			if err := json.Unmarshal(body, &req); err != nil {
 				t.Errorf("failed to decode request body: %v", err)
 			}
-			if req.Params.Options["role"][0] != "admin" {
-				t.Errorf("params not passed correctly: %+v", req.Params)
+			if req.Consumer != "grafana" {
+				t.Errorf("consumer = %q, want %q", req.Consumer, "grafana")
+			}
+			if len(req.Params) != 1 || req.Params[0] != "--verbose" {
+				t.Errorf("params = %v, want [--verbose]", req.Params)
 			}
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(credentialResponseBody{
-				Credentials: map[string]string{"username": "grafana-user", "password": "secret"},
-			})
+			_ = json.NewEncoder(w).Encode(map[string]string{"username": "grafana-user", "password": "secret"})
 		}))
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		params := Params{
-			Options: map[string][]string{"role": {"admin"}},
-		}
-
-		creds, err := client.Create(context.Background(), "grafana", params)
+		creds, err := client.Create(context.Background(), "grafana", Params{"--verbose"})
 		if err != nil {
 			t.Fatalf("Create() returned error: %v", err)
 		}
@@ -59,22 +56,22 @@ func TestHTTPClient_Create(t *testing.T) {
 		}
 	})
 
-	t.Run("should send empty params when Params is zero value", func(t *testing.T) {
+	t.Run("should send empty params when Params is nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
-			var req credentialRequestBody
+			var req createRequestBody
 			_ = json.Unmarshal(body, &req)
-			if len(req.Params.Options) != 0 || len(req.Params.Args) != 0 {
-				t.Errorf("expected empty params in request body, got %+v", req.Params)
+			if len(req.Params) != 0 {
+				t.Errorf("expected empty params, got %v", req.Params)
 			}
 
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(credentialResponseBody{Credentials: map[string]string{"apiKey": "abc"}})
+			_ = json.NewEncoder(w).Encode(map[string]string{"apiKey": "abc"})
 		}))
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		creds, err := client.Create(context.Background(), "consumer", Params{})
+		creds, err := client.Create(context.Background(), "consumer", nil)
 		if err != nil {
 			t.Fatalf("Create() returned error: %v", err)
 		}
@@ -90,7 +87,7 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Create(context.Background(), "consumer", Params{})
+		_, err := client.Create(context.Background(), "consumer", nil)
 		if err == nil {
 			t.Fatal("Create() expected error for non-201 response")
 		}
@@ -98,7 +95,7 @@ func TestHTTPClient_Create(t *testing.T) {
 
 	t.Run("should return error when server is unreachable", func(t *testing.T) {
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		_, err := client.Create(context.Background(), "consumer", Params{})
+		_, err := client.Create(context.Background(), "consumer", nil)
 		if err == nil {
 			t.Fatal("Create() expected error for unreachable server")
 		}
@@ -106,54 +103,9 @@ func TestHTTPClient_Create(t *testing.T) {
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		_, err := client.Create(context.Background(), "consumer", Params{})
+		_, err := client.Create(context.Background(), "consumer", nil)
 		if err == nil {
 			t.Fatal("Create() expected error for invalid URL")
-		}
-	})
-}
-
-func TestHTTPClient_Update(t *testing.T) {
-	t.Run("should send OUT request and return refreshed credentials on success", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPut {
-				t.Errorf("method = %q, want PUT", r.Method)
-			}
-			if r.URL.Path != "/grafana" {
-				t.Errorf("path = %q, want /grafana", r.URL.Path)
-			}
-			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s header = %q, want %q", apiKeyHeader, got, "test-api-key")
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(credentialResponseBody{
-				Credentials: map[string]string{"username": "grafana-user", "password": "rotated"},
-			})
-		}))
-		defer server.Close()
-
-		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.Update(context.Background(), "grafana", Params{})
-		if err != nil {
-			t.Fatalf("Update() returned error: %v", err)
-		}
-		if creds["password"] != "rotated" {
-			t.Errorf("password = %q, want %q", creds["password"], "rotated")
-		}
-	})
-
-	t.Run("should return error when producer returns non-200 status", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "conflict", http.StatusConflict)
-		}))
-		defer server.Close()
-
-		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Update(context.Background(), "consumer", Params{})
-		if err == nil {
-			t.Fatal("Update() expected error for non-200 response")
 		}
 	})
 }
@@ -168,7 +120,7 @@ func TestHTTPClient_Delete(t *testing.T) {
 				t.Errorf("path = %q, want /grafana", r.URL.Path)
 			}
 			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s header = %q, want %q", apiKeyHeader, got, "test-api-key")
+				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
 			}
 			w.WriteHeader(http.StatusOK)
 		}))

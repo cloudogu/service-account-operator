@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func newTestScheme(t *testing.T) *runtime.Scheme {
@@ -51,12 +52,10 @@ func TestSecretManager_Exists(t *testing.T) {
 		}
 	})
 
-	t.Run("should return true when target secret exists", func(t *testing.T) {
+	t.Run("should return true when target secret exists and is owned by the SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		existing := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-		}
+		existing := newOwnedSecret("grafana-to-prometheus", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
@@ -69,13 +68,29 @@ func TestSecretManager_Exists(t *testing.T) {
 		}
 	})
 
+	t.Run("should return false when target secret exists but is not owned by this SARE", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		existing := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+		}
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		exists, err := sm.Exists(context.Background(), sare)
+		if err != nil {
+			t.Fatalf("Exists() returned error: %v", err)
+		}
+		if exists {
+			t.Errorf("exists = true, want false")
+		}
+	})
+
 	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
 		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-creds"}
-		existing := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "custom-creds", Namespace: "ecosystem"},
-		}
+		existing := newOwnedSecret("custom-creds", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
@@ -167,6 +182,33 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		}
 	})
 
+	t.Run("should set owner reference on pre-existing secret without ownerRef", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		sare.UID = "test-uid-123"
+		existing := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+		}
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
+		if err != nil {
+			t.Fatalf("CreateOrUpdate() returned error: %v", err)
+		}
+
+		var secret corev1.Secret
+		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret); err != nil {
+			t.Fatalf("secret not found: %v", err)
+		}
+		if len(secret.OwnerReferences) != 1 {
+			t.Fatalf("OwnerReferences length = %d, want 1", len(secret.OwnerReferences))
+		}
+		if string(secret.OwnerReferences[0].UID) != "test-uid-123" {
+			t.Errorf("owner UID = %q, want %q", secret.OwnerReferences[0].UID, "test-uid-123")
+		}
+	})
+
 	t.Run("should update existing secret credentials", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
@@ -190,4 +232,15 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 			t.Errorf("username = %q, want %q", secret.StringData["username"], "new-user")
 		}
 	})
+}
+
+func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
+	t.Helper()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	if err := controllerutil.SetControllerReference(owner, secret, scheme); err != nil {
+		t.Fatalf("SetControllerReference() error: %v", err)
+	}
+	return secret
 }

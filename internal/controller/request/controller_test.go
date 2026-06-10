@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // mockHTTPClient is a hand-written test double for httpclient.HTTPClient.
@@ -88,6 +89,17 @@ func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
 }
 
+func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
+	t.Helper()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	if err := controllerutil.SetControllerReference(owner, secret, scheme); err != nil {
+		t.Fatalf("SetControllerReference() error: %v", err)
+	}
+	return secret
+}
+
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
 	return apimeta.FindStatusCondition(conditions, condType)
 }
@@ -149,9 +161,7 @@ func TestController_Reconcile(t *testing.T) {
 	t.Run("should skip reconcile when target secret already exists in cluster", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
-		existingSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-		}
+		existingSecret := newOwnedSecret("grafana-to-prometheus", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existingSecret).Build()
 		factoryMock := newMockProducerClientFactory(t)
 		controller := New(rtClient, scheme)
@@ -168,9 +178,7 @@ func TestController_Reconcile(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
 		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-secret"}
-		existingSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "custom-secret", Namespace: "ecosystem"},
-		}
+		existingSecret := newOwnedSecret("custom-secret", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existingSecret).Build()
 		controller := New(rtClient, scheme)
 

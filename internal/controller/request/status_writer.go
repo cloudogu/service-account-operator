@@ -29,61 +29,44 @@ func newStatusWriter(c client.Client, sare *serviceaccountv1.ServiceAccountReque
 	}
 }
 
-func (s *statusWriter) set(condType string, status metav1.ConditionStatus, reason, message string) {
+// producerReady sets ProducerReady=True and persists the condition.
+func (s *statusWriter) producerReady(ctx context.Context) error {
+	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionTrue,
+		serviceaccountv1.ConditionReasonProducerReadyProducerFound, "")
+}
+
+// producerNotFound sets ProducerReady=False with the producer name and underlying error in the message.
+func (s *statusWriter) producerNotFound(ctx context.Context, producer string, err error) error {
+	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionFalse,
+		serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
+		fmt.Sprintf("producer %q not found: %s", producer, err.Error()))
+}
+
+// serviceAccountReady sets ServiceAccountReady=True and persists the condition.
+func (s *statusWriter) serviceAccountReady(ctx context.Context) error {
+	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionTrue,
+		serviceaccountv1.ConditionReasonServiceAccountReadyCreated, "")
+}
+
+// serviceAccountFailed sets ServiceAccountReady=False with the error message and persists the condition.
+func (s *statusWriter) serviceAccountFailed(ctx context.Context, err error) error {
+	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
+		serviceaccountv1.ConditionReasonServiceAccountReadyFailed, err.Error())
+}
+
+// setAndPersist sets a condition on the SARE and patches the status subresource.
+// It advances the internal snapshot so subsequent calls only diff against the new state.
+func (s *statusWriter) setAndPersist(ctx context.Context, condType string, condStatus metav1.ConditionStatus, reason, message string) error {
 	apimeta.SetStatusCondition(&s.sare.Status.Conditions, metav1.Condition{
 		Type:               condType,
-		Status:             status,
+		Status:             condStatus,
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: s.sare.Generation,
 	})
-}
-
-func (s *statusWriter) producerReady(ctx context.Context) error {
-	s.set(serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionTrue,
-		serviceaccountv1.ConditionReasonProducerReadyProducerFound, "")
-	if err := s.persist(ctx); err != nil {
-		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeProducerReady, err)
+	if err := s.client.Status().Patch(ctx, s.sare, client.MergeFrom(s.before)); err != nil {
+		return fmt.Errorf("failed to persist %s condition: %w", condType, err)
 	}
+	s.before = s.sare.DeepCopy()
 	return nil
-}
-
-// TODO Könnte man hier nicht auch den eigentlichen Error mitliefern? Wie bei serviceAccountFailed
-// TODO Den Rumpf der Methode kann man auslagern.
-func (s *statusWriter) producerNotFound(ctx context.Context, producer string) error {
-	s.set(serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionFalse,
-		serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
-		fmt.Sprintf("producer %q not found", producer))
-	if err := s.persist(ctx); err != nil {
-		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeProducerReady, err)
-	}
-	return nil
-}
-
-func (s *statusWriter) serviceAccountReady(ctx context.Context) error {
-	s.set(serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionTrue,
-		serviceaccountv1.ConditionReasonServiceAccountReadyCreated, "")
-	if err := s.persist(ctx); err != nil {
-		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeServiceAccountReady, err)
-	}
-	return nil
-}
-
-func (s *statusWriter) serviceAccountFailed(ctx context.Context, err error) error {
-	s.set(serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
-		serviceaccountv1.ConditionReasonServiceAccountReadyFailed, err.Error())
-	if patchErr := s.persist(ctx); patchErr != nil {
-		return fmt.Errorf("failed to persist %s condition: %w", serviceaccountv1.ConditionTypeServiceAccountReady, patchErr)
-	}
-	return nil
-}
-
-// persist patches the status subresource with the buffered condition changes and advances
-// the internal snapshot so subsequent calls on the same writer only diff against the new state.
-func (s *statusWriter) persist(ctx context.Context) error {
-	err := s.client.Status().Patch(ctx, s.sare, client.MergeFrom(s.before))
-	if err == nil {
-		s.before = s.sare.DeepCopy()
-	}
-	return err
 }

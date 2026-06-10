@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
@@ -76,7 +77,7 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", true)
 		rtClient := buildStatusWriterClient(t, sare)
 
-		err := newStatusWriter(rtClient, sare).producerNotFound(context.Background(), "prometheus")
+		err := newStatusWriter(rtClient, sare).producerNotFound(context.Background(), "prometheus", fmt.Errorf("not found"))
 
 		require.NoError(t, err)
 		updated := getUpdatedSARE(t, rtClient, sare)

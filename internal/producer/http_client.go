@@ -16,29 +16,28 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
-// Params contains the parameters forwarded to the producer when creating or updating a service account.
-type Params struct {
-	Options map[string][]string
-	Args    []string
-}
+// Params is the list of parameters forwarded to the producer when creating a service account.
+type Params []string
 
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Update re-provisions an existing service account and returns the refreshed credentials.
+	// Not yet implemented — requires a PUT endpoint on the producer side.
 	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
 }
 
+// HttpClient is an HTTP client bound to a specific producer endpoint and API key.
 type HttpClient struct {
 	client   *http.Client
 	endpoint string
 	apiKey   string
 }
 
-// NewHTTPClient creates an HTTPClient bound to a specific producer endpoint and API key.
+// NewHTTPClient creates an HttpClient bound to a specific producer endpoint and API key.
 func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 	return &HttpClient{
 		client:   &http.Client{Timeout: defaultTimeout},
@@ -47,36 +46,54 @@ func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 	}
 }
 
-type credentialRequestBody struct {
-	Params credentialParamsBody `json:"params,omitempty"`
+type createRequestBody struct {
+	Consumer string `json:"consumer"`
+	Params   Params `json:"params,omitempty"`
 }
 
-// TODO this structure does not reflect the current API -> consumer:string, params:[]string
-type credentialParamsBody struct {
-	Options map[string][]string `json:"options,omitempty"`
-	Args    []string            `json:"args,omitempty"`
-}
-
-type credentialResponseBody struct {
-	Credentials map[string]string `json:"credentials"`
-}
-
-// Create calls PUT {endpoint}/{consumer} to create a service account and returns the credentials.
-// TODO PUT ist idempotent und sollte für Updates verwendet werden. POST für Create.
+// Create calls POST {endpoint} to create a service account and returns the credentials.
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	return c.credentialRequest(ctx, http.MethodPost, consumer, params, http.StatusCreated)
+	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(apiKeyHeader, c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request to producer %q failed: %w", c.endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("producer returned unexpected status %d for %q: %s", resp.StatusCode, c.endpoint, string(respBody))
+	}
+
+	var credentials map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&credentials); err != nil {
+		return nil, fmt.Errorf("failed to decode producer response: %w", err)
+	}
+
+	return credentials, nil
 }
 
-// Update calls POST {endpoint}/{consumer} to re-provision a service account and returns the refreshed credentials.
-func (c *HttpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	return c.credentialRequest(ctx, http.MethodPut, consumer, params, http.StatusOK)
+// Update is not yet implemented. The producer API requires a PUT endpoint that does not exist yet.
+func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]string, error) {
+	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
 }
 
 // Delete calls DELETE {endpoint}/{consumer} to remove a service account.
 func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
-	targetURL, err := c.consumerURL(consumer)
+	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, targetURL, nil)
@@ -89,8 +106,7 @@ func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 	if err != nil {
 		return fmt.Errorf("HTTP request to producer %q failed: %w", targetURL, err)
 	}
-	// TODO unhandled error
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// A missing service account is an acceptable outcome for a delete.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
@@ -99,59 +115,4 @@ func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 	}
 
 	return nil
-}
-
-// credentialRequest performs a create/update request that sends params and returns credentials.
-func (c *HttpClient) credentialRequest(ctx context.Context, method, consumer string, params Params, expectedStatus int) (map[string]string, error) {
-	targetURL, err := c.consumerURL(consumer)
-	if err != nil {
-		return nil, err
-	}
-
-	if method == http.MethodPost {
-		targetURL = c.endpoint
-	}
-
-	body, err := json.Marshal(credentialRequestBody{
-		Params: credentialParamsBody{Options: params.Options, Args: params.Args},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(apiKeyHeader, c.apiKey)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request to producer %q failed: %w", targetURL, err)
-	}
-	// TODO unhandled error
-	defer resp.Body.Close()
-
-	if resp.StatusCode != expectedStatus {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("producer returned unexpected status %d for %q: %s", resp.StatusCode, targetURL, string(respBody))
-	}
-
-	var result credentialResponseBody
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode producer response: %w", err)
-	}
-
-	return result.Credentials, nil
-}
-
-// TODO Kann es hier zukünftig für Multi-CES Probleme geben? Consumer == ehemaliger Service. Was ist wenn mehrere Grafana-Dogus von einem zentrale Prometheus SAs beantragen?
-// TODO Außerdem: benötigt POST PATH Parameter?
-func (c *HttpClient) consumerURL(consumer string) (string, error) {
-	targetURL, err := url.JoinPath(c.endpoint, consumer)
-	if err != nil {
-		return "", fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)
-	}
-	return targetURL, nil
 }

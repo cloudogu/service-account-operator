@@ -14,23 +14,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// SecretManager manages the Kubernetes Secret that holds a service account's credentials.
-// TODO interface kann gelöscht werden? Return concrete types
-type SecretManager interface {
-	// Exists reports whether the target Secret for the given SARE already exists in the cluster.
-	Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error)
-	// CreateOrUpdate writes the credentials to the target Secret and returns its name.
-	CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error)
-}
-
-type secretManager struct {
+type SecretManager struct {
 	client client.Client
 	scheme *runtime.Scheme
 }
 
 // NewSecretManager creates a SecretManager that writes Secrets in the cluster.
-func NewSecretManager(c client.Client, scheme *runtime.Scheme) SecretManager {
-	return &secretManager{client: c, scheme: scheme}
+func NewSecretManager(c client.Client, scheme *runtime.Scheme) *SecretManager {
+	return &SecretManager{client: c, scheme: scheme}
 }
 
 // resolveSecretName returns the name of the Secret the credentials are written to:
@@ -43,13 +34,12 @@ func resolveSecretName(sare *serviceaccountv1.ServiceAccountRequest) string {
 }
 
 // Exists reports whether the target Secret for the given SARE already exists in the cluster.
-func (sm *secretManager) Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error) {
+func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error) {
 	name := resolveSecretName(sare)
 	var secret corev1.Secret
 	err := sm.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: name}, &secret)
 	if err == nil {
-		// TODO should we check if the secret has a specific label? To avoid conflicts with other secrets.
-		return true, nil
+		return metav1.IsControlledBy(&secret, sare), nil
 	}
 	if apierrors.IsNotFound(err) {
 		return false, nil
@@ -59,7 +49,7 @@ func (sm *secretManager) Exists(ctx context.Context, sare *serviceaccountv1.Serv
 
 // CreateOrUpdate creates or updates the Kubernetes Secret for the given SARE with the provided credentials.
 // It returns the name of the secret that was written.
-func (sm *secretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error) {
+func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error) {
 	secretName := resolveSecretName(sare)
 
 	secret := &corev1.Secret{
