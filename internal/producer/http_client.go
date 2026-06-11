@@ -28,6 +28,8 @@ type ServiceAccountClient interface {
 	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
+	// Ready returns nil when the producer endpoint is reachable
+	Ready(ctx context.Context) error
 }
 
 // HttpClient is an HTTP client bound to a specific producer endpoint and API key.
@@ -87,6 +89,25 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 // Update is not yet implemented. The producer API requires a PUT endpoint that does not exist yet.
 func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]string, error) {
 	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
+}
+
+// Ready probes the producer endpoint with a HEAD request. Any HTTP response — even 4xx/5xx —
+// counts as reachable; only transport errors (DNS failure, connection refused, missing netpols)
+// mean the endpoint is unreachable.
+func (c *HttpClient) Ready(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build readiness probe request for %q: %w", c.endpoint, err)
+	}
+	req.Header.Set(apiKeyHeader, c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("endpoint %q is not reachable: %w", c.endpoint, err)
+	}
+	_ = resp.Body.Close()
+
+	return nil
 }
 
 // Delete calls DELETE {endpoint}/{consumer} to remove a service account.

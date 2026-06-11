@@ -110,6 +110,41 @@ func TestHTTPClient_Create(t *testing.T) {
 	})
 }
 
+func TestHTTPClient_Ready(t *testing.T) {
+	t.Run("should send HEAD with api key and succeed on any HTTP response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodHead {
+				t.Errorf("method = %q, want HEAD", r.Method)
+			}
+			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
+				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed) // any HTTP response counts as reachable
+		}))
+		defer server.Close()
+
+		client := NewHTTPClient(server.URL, "test-api-key")
+		if err := client.Ready(context.Background()); err != nil {
+			t.Fatalf("Ready() returned error: %v", err)
+		}
+	})
+
+	t.Run("should return error when endpoint is unreachable", func(t *testing.T) {
+		// Port 1 on loopback is not listening, so the connection is refused immediately.
+		client := NewHTTPClient("http://127.0.0.1:1", "key")
+		if err := client.Ready(context.Background()); err == nil {
+			t.Fatal("Ready() expected error for unreachable endpoint")
+		}
+	})
+
+	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
+		client := NewHTTPClient("://invalid", "key")
+		if err := client.Ready(context.Background()); err == nil {
+			t.Fatal("Ready() expected error for invalid URL")
+		}
+	})
+}
+
 func TestHTTPClient_Delete(t *testing.T) {
 	t.Run("should send DELETE request and succeed on 200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

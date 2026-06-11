@@ -41,6 +41,10 @@ func (m *mockHTTPClient) Delete(_ context.Context, _ string) error {
 	return m.err
 }
 
+func (m *mockHTTPClient) Ready(_ context.Context) error {
+	return m.err
+}
+
 // --- helpers ---
 
 func newTestScheme(t *testing.T) *runtime.Scheme {
@@ -121,16 +125,16 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, ctrl.Result{}, result)
 	})
 
-	t.Run("should add finalizer when missing and return empty result", func(t *testing.T) {
+	t.Run("should add finalizer when missing and continue reconciling in the same pass", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem", "prometheus", false)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 		controller := New(rtClient, scheme)
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.NoError(t, err)
-		assert.Equal(t, ctrl.Result{}, result)
+		// The required producer is missing, so reconcile proceeds past the finalizer step and errors out.
+		// This proves the finalizer addition no longer short-circuits the pass.
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+		require.Error(t, err)
 
 		var updated serviceaccountv1.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))

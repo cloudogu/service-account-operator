@@ -128,6 +128,52 @@ func (_c *MockServiceAccountClient_Delete_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// Ready provides a mock function with given fields: ctx
+func (_m *MockServiceAccountClient) Ready(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Ready")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockServiceAccountClient_Ready_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Ready'
+type MockServiceAccountClient_Ready_Call struct {
+	*mock.Call
+}
+
+// Ready is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockServiceAccountClient_Expecter) Ready(ctx interface{}) *MockServiceAccountClient_Ready_Call {
+	return &MockServiceAccountClient_Ready_Call{Call: _e.mock.On("Ready", ctx)}
+}
+
+func (_c *MockServiceAccountClient_Ready_Call) Run(run func(ctx context.Context)) *MockServiceAccountClient_Ready_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Ready_Call) Return(_a0 error) *MockServiceAccountClient_Ready_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Ready_Call) RunAndReturn(run func(context.Context) error) *MockServiceAccountClient_Ready_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Update provides a mock function with given fields: ctx, consumer, params
 func (_m *MockServiceAccountClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	ret := _m.Called(ctx, consumer, params)

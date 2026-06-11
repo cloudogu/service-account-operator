@@ -23,7 +23,7 @@ func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, names
 		return nil, fmt.Errorf("producer %q has no HTTP spec configured", sapr.Name)
 	}
 
-	apiKey, err := f.getAPIKey(ctx, namespace, sapr.Spec.HTTP.AuthSecret)
+	apiKey, err := resolveAPIKey(ctx, f.rtClient, namespace, sapr.Spec.HTTP.AuthSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get API key for producer %q: %w", sapr.Name, err)
 	}
@@ -31,9 +31,10 @@ func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, names
 	return NewHTTPClient(sapr.Spec.HTTP.Endpoint, apiKey), nil
 }
 
-func (f *DefaultProducerClientFactory) getAPIKey(ctx context.Context, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
+// resolveAPIKey reads the producer's API key from the referenced Kubernetes Secret.
+func resolveAPIKey(ctx context.Context, rtClient client.Client, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
 	var secret corev1.Secret
-	if err := f.rtClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: authSecret.Name}, &secret); err != nil {
+	if err := rtClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: authSecret.Name}, &secret); err != nil {
 		return "", fmt.Errorf("failed to get auth secret %q: %w", authSecret.Name, err)
 	}
 

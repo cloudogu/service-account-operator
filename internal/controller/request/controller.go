@@ -40,15 +40,14 @@ type serviceAccountClient interface {
 
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
-	// TODO no need to export the client
-	client.Client
+	client                client.Client
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
 }
 
 func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
 	return &Controller{
-		Client:                rtClient,
+		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
 		producerClientFactory: producer.NewProducerClientFactory(rtClient),
 	}
@@ -56,7 +55,7 @@ func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var sare serviceaccountv1.ServiceAccountRequest
-	if err := c.Get(ctx, req.NamespacedName, &sare); err != nil {
+	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -65,11 +64,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if controllerutil.AddFinalizer(&sare, finalizer) {
-		if err := c.Update(ctx, &sare); err != nil {
+		if err := c.client.Update(ctx, &sare); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to add finalizer to service account request %q: %w", sare.Name, err)
 		}
-		// TODO This cannot work. Either continue the reconciliation or return result with requeue.
-		return ctrl.Result{}, nil
+		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
 	}
 
 	exists, err := c.secretManager.Exists(ctx, &sare)
@@ -82,12 +80,17 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	return c.reconcileCreate(ctx, &sare)
-	// TODO Do we need to restart the consumer if the serviceaccount is optional?
 }
+
+// TODO(open question): When an optional service account is created only after the consumer has
+// already started (the consumer came up without it), the consumer may not pick up the new
+// credentials until it is restarted. Decide whether this operator should trigger a consumer
+// restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
+// reload credentials on its own. Pending product decision before implementing.
 
 func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-	status := newStatusWriter(c.Client, sare)
+	status := newStatusWriter(c.client, sare)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
@@ -150,7 +153,7 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 		return err
 	}
 	controllerutil.RemoveFinalizer(sare, finalizer)
-	if err := c.Update(ctx, sare); err != nil {
+	if err := c.client.Update(ctx, sare); err != nil {
 		return fmt.Errorf("failed to remove finalizer from service account request %q: %w", sare.Name, err)
 	}
 
@@ -169,7 +172,7 @@ func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv1
 
 func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv1.ServiceAccountProducer, error) {
 	var sapr serviceaccountv1.ServiceAccountProducer
-	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
+	if err := c.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
 		return nil, err
 	}
 
@@ -194,7 +197,7 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 	logger := logf.FromContext(ctx).WithValues("producer", obj.GetName())
 
 	var sareList serviceaccountv1.ServiceAccountRequestList
-	if err := c.List(ctx, &sareList, client.InNamespace(obj.GetNamespace())); err != nil {
+	if err := c.client.List(ctx, &sareList, client.InNamespace(obj.GetNamespace())); err != nil {
 		logger.Error(err, "failed to list service account requests for producer event")
 		return nil
 	}
