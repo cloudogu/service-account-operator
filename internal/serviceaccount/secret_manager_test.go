@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,12 +18,8 @@ import (
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := serviceaccountv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme(serviceaccountv1) error: %v", err)
-	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme(corev1) error: %v", err)
-	}
+	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
 	return scheme
 }
 
@@ -44,12 +42,9 @@ func TestSecretManager_Exists(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(context.Background(), sare)
-		if err != nil {
-			t.Fatalf("Exists() returned error: %v", err)
-		}
-		if exists {
-			t.Errorf("exists = true, want false")
-		}
+
+		require.NoError(t, err)
+		assert.False(t, exists)
 	})
 
 	t.Run("should return true when target secret exists and is owned by the SARE", func(t *testing.T) {
@@ -60,12 +55,9 @@ func TestSecretManager_Exists(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(context.Background(), sare)
-		if err != nil {
-			t.Fatalf("Exists() returned error: %v", err)
-		}
-		if !exists {
-			t.Errorf("exists = false, want true")
-		}
+
+		require.NoError(t, err)
+		assert.True(t, exists)
 	})
 
 	t.Run("should return false when target secret exists but is not owned by this SARE", func(t *testing.T) {
@@ -78,12 +70,9 @@ func TestSecretManager_Exists(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(context.Background(), sare)
-		if err != nil {
-			t.Fatalf("Exists() returned error: %v", err)
-		}
-		if exists {
-			t.Errorf("exists = true, want false")
-		}
+
+		require.NoError(t, err)
+		assert.False(t, exists)
 	})
 
 	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
@@ -95,12 +84,9 @@ func TestSecretManager_Exists(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(context.Background(), sare)
-		if err != nil {
-			t.Fatalf("Exists() returned error: %v", err)
-		}
-		if !exists {
-			t.Errorf("exists = false, want true")
-		}
+
+		require.NoError(t, err)
+		assert.True(t, exists)
 	})
 }
 
@@ -114,23 +100,14 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		creds := map[string]string{"username": "user1", "password": "pass1"}
 
 		secretName, err := sm.CreateOrUpdate(context.Background(), sare, creds)
-		if err != nil {
-			t.Fatalf("CreateOrUpdate() returned error: %v", err)
-		}
-		if secretName != "grafana-to-prometheus" {
-			t.Errorf("secretName = %q, want %q", secretName, "grafana-to-prometheus")
-		}
+
+		require.NoError(t, err)
+		assert.Equal(t, "grafana-to-prometheus", secretName)
 
 		var secret corev1.Secret
-		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret); err != nil {
-			t.Fatalf("secret not found: %v", err)
-		}
-		if secret.StringData["username"] != "user1" {
-			t.Errorf("username = %q, want %q", secret.StringData["username"], "user1")
-		}
-		if secret.StringData["password"] != "pass1" {
-			t.Errorf("password = %q, want %q", secret.StringData["password"], "pass1")
-		}
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		assert.Equal(t, "user1", secret.StringData["username"])
+		assert.Equal(t, "pass1", secret.StringData["password"])
 	})
 
 	t.Run("should create secret with name from spec.secretRef when set", func(t *testing.T) {
@@ -142,17 +119,12 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		sm := NewSecretManager(rtClient, scheme)
 
 		secretName, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"apiKey": "abc"})
-		if err != nil {
-			t.Fatalf("CreateOrUpdate() returned error: %v", err)
-		}
-		if secretName != "custom-prometheus-creds" {
-			t.Errorf("secretName = %q, want %q", secretName, "custom-prometheus-creds")
-		}
+
+		require.NoError(t, err)
+		assert.Equal(t, "custom-prometheus-creds", secretName)
 
 		var secret corev1.Secret
-		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "custom-prometheus-creds", Namespace: "ecosystem"}, &secret); err != nil {
-			t.Fatalf("secret not found: %v", err)
-		}
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "custom-prometheus-creds", Namespace: "ecosystem"}, &secret))
 	})
 
 	t.Run("should set owner reference pointing to the SARE", func(t *testing.T) {
@@ -163,23 +135,13 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
-		if err != nil {
-			t.Fatalf("CreateOrUpdate() returned error: %v", err)
-		}
+		require.NoError(t, err)
 
 		var secret corev1.Secret
-		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret); err != nil {
-			t.Fatalf("secret not found: %v", err)
-		}
-		if len(secret.OwnerReferences) != 1 {
-			t.Fatalf("OwnerReferences length = %d, want 1", len(secret.OwnerReferences))
-		}
-		if secret.OwnerReferences[0].Name != "grafana-to-prometheus" {
-			t.Errorf("owner name = %q, want %q", secret.OwnerReferences[0].Name, "grafana-to-prometheus")
-		}
-		if string(secret.OwnerReferences[0].UID) != "test-uid-123" {
-			t.Errorf("owner UID = %q, want %q", secret.OwnerReferences[0].UID, "test-uid-123")
-		}
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.Len(t, secret.OwnerReferences, 1)
+		assert.Equal(t, "grafana-to-prometheus", secret.OwnerReferences[0].Name)
+		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
 	})
 
 	t.Run("should set owner reference on pre-existing secret without ownerRef", func(t *testing.T) {
@@ -193,20 +155,12 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
-		if err != nil {
-			t.Fatalf("CreateOrUpdate() returned error: %v", err)
-		}
+		require.NoError(t, err)
 
 		var secret corev1.Secret
-		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret); err != nil {
-			t.Fatalf("secret not found: %v", err)
-		}
-		if len(secret.OwnerReferences) != 1 {
-			t.Fatalf("OwnerReferences length = %d, want 1", len(secret.OwnerReferences))
-		}
-		if string(secret.OwnerReferences[0].UID) != "test-uid-123" {
-			t.Errorf("owner UID = %q, want %q", secret.OwnerReferences[0].UID, "test-uid-123")
-		}
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.Len(t, secret.OwnerReferences, 1)
+		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
 	})
 
 	t.Run("should update existing secret credentials", func(t *testing.T) {
@@ -220,17 +174,11 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"username": "new-user", "password": "new-pass"})
-		if err != nil {
-			t.Fatalf("CreateOrUpdate() returned error: %v", err)
-		}
+		require.NoError(t, err)
 
 		var secret corev1.Secret
-		if err := rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret); err != nil {
-			t.Fatalf("secret not found: %v", err)
-		}
-		if secret.StringData["username"] != "new-user" {
-			t.Errorf("username = %q, want %q", secret.StringData["username"], "new-user")
-		}
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		assert.Equal(t, "new-user", secret.StringData["username"])
 	})
 }
 
@@ -239,8 +187,6 @@ func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccou
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 	}
-	if err := controllerutil.SetControllerReference(owner, secret, scheme); err != nil {
-		t.Fatalf("SetControllerReference() error: %v", err)
-	}
+	require.NoError(t, controllerutil.SetControllerReference(owner, secret, scheme))
 	return secret
 }

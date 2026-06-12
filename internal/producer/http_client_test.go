@@ -7,35 +7,24 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPClient_Create(t *testing.T) {
 	t.Run("should send POST with consumer and params in body and return credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				t.Errorf("method = %q, want POST", r.Method)
-			}
-			if r.URL.Path != "/" {
-				t.Errorf("path = %q, want /", r.URL.Path)
-			}
-			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
-			}
-			if got := r.Header.Get("Content-Type"); got != "application/json" {
-				t.Errorf("Content-Type = %q, want application/json", got)
-			}
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, _ := io.ReadAll(r.Body)
 			var req createRequestBody
-			if err := json.Unmarshal(body, &req); err != nil {
-				t.Errorf("failed to decode request body: %v", err)
-			}
-			if req.Consumer != "grafana" {
-				t.Errorf("consumer = %q, want %q", req.Consumer, "grafana")
-			}
-			if len(req.Params) != 1 || req.Params[0] != "--verbose" {
-				t.Errorf("params = %v, want [--verbose]", req.Params)
-			}
+			require.NoError(t, json.Unmarshal(body, &req))
+			assert.Equal(t, "grafana", req.Consumer)
+			assert.Equal(t, Params{"--verbose"}, req.Params)
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -45,15 +34,10 @@ func TestHTTPClient_Create(t *testing.T) {
 
 		client := NewHTTPClient(server.URL, "test-api-key")
 		creds, err := client.Create(context.Background(), "grafana", Params{"--verbose"})
-		if err != nil {
-			t.Fatalf("Create() returned error: %v", err)
-		}
-		if creds["username"] != "grafana-user" {
-			t.Errorf("username = %q, want %q", creds["username"], "grafana-user")
-		}
-		if creds["password"] != "secret" {
-			t.Errorf("password = %q, want %q", creds["password"], "secret")
-		}
+
+		require.NoError(t, err)
+		assert.Equal(t, "grafana-user", creds["username"])
+		assert.Equal(t, "secret", creds["password"])
 	})
 
 	t.Run("should send empty params when Params is nil", func(t *testing.T) {
@@ -61,9 +45,7 @@ func TestHTTPClient_Create(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			var req createRequestBody
 			_ = json.Unmarshal(body, &req)
-			if len(req.Params) != 0 {
-				t.Errorf("expected empty params, got %v", req.Params)
-			}
+			assert.Empty(t, req.Params)
 
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"apiKey": "abc"})
@@ -72,12 +54,9 @@ func TestHTTPClient_Create(t *testing.T) {
 
 		client := NewHTTPClient(server.URL, "key")
 		creds, err := client.Create(context.Background(), "consumer", nil)
-		if err != nil {
-			t.Fatalf("Create() returned error: %v", err)
-		}
-		if creds["apiKey"] != "abc" {
-			t.Errorf("apiKey = %q, want %q", creds["apiKey"], "abc")
-		}
+
+		require.NoError(t, err)
+		assert.Equal(t, "abc", creds["apiKey"])
 	})
 
 	t.Run("should return error when producer returns non-201 status", func(t *testing.T) {
@@ -88,83 +67,62 @@ func TestHTTPClient_Create(t *testing.T) {
 
 		client := NewHTTPClient(server.URL, "key")
 		_, err := client.Create(context.Background(), "consumer", nil)
-		if err == nil {
-			t.Fatal("Create() expected error for non-201 response")
-		}
+
+		require.Error(t, err)
 	})
 
 	t.Run("should return error when server is unreachable", func(t *testing.T) {
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
 		_, err := client.Create(context.Background(), "consumer", nil)
-		if err == nil {
-			t.Fatal("Create() expected error for unreachable server")
-		}
+
+		require.Error(t, err)
 	})
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
 		_, err := client.Create(context.Background(), "consumer", nil)
-		if err == nil {
-			t.Fatal("Create() expected error for invalid URL")
-		}
+
+		require.Error(t, err)
 	})
 }
 
 func TestHTTPClient_Ready(t *testing.T) {
 	t.Run("should send HEAD with api key and succeed on any HTTP response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodHead {
-				t.Errorf("method = %q, want HEAD", r.Method)
-			}
-			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
-			}
+			assert.Equal(t, http.MethodHead, r.Method)
+			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
 			w.WriteHeader(http.StatusMethodNotAllowed) // any HTTP response counts as reachable
 		}))
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		if err := client.Ready(context.Background()); err != nil {
-			t.Fatalf("Ready() returned error: %v", err)
-		}
+		require.NoError(t, client.Ready(context.Background()))
 	})
 
 	t.Run("should return error when endpoint is unreachable", func(t *testing.T) {
 		// Port 1 on loopback is not listening, so the connection is refused immediately.
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		if err := client.Ready(context.Background()); err == nil {
-			t.Fatal("Ready() expected error for unreachable endpoint")
-		}
+		require.Error(t, client.Ready(context.Background()))
 	})
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		if err := client.Ready(context.Background()); err == nil {
-			t.Fatal("Ready() expected error for invalid URL")
-		}
+		require.Error(t, client.Ready(context.Background()))
 	})
 }
 
 func TestHTTPClient_Delete(t *testing.T) {
 	t.Run("should send DELETE request and succeed on 200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodDelete {
-				t.Errorf("method = %q, want DELETE", r.Method)
-			}
-			if r.URL.Path != "/grafana" {
-				t.Errorf("path = %q, want /grafana", r.URL.Path)
-			}
-			if got := r.Header.Get(apiKeyHeader); got != "test-api-key" {
-				t.Errorf("%s = %q, want %q", apiKeyHeader, got, "test-api-key")
-			}
+			assert.Equal(t, http.MethodDelete, r.Method)
+			assert.Equal(t, "/grafana", r.URL.Path)
+			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		if err := client.Delete(context.Background(), "grafana"); err != nil {
-			t.Fatalf("Delete() returned error: %v", err)
-		}
+		require.NoError(t, client.Delete(context.Background(), "grafana"))
 	})
 
 	t.Run("should succeed on 204 No Content", func(t *testing.T) {
@@ -174,9 +132,7 @@ func TestHTTPClient_Delete(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		if err := client.Delete(context.Background(), "consumer"); err != nil {
-			t.Fatalf("Delete() returned error: %v", err)
-		}
+		require.NoError(t, client.Delete(context.Background(), "consumer"))
 	})
 
 	t.Run("should treat 404 as success since the account is already gone", func(t *testing.T) {
@@ -186,9 +142,7 @@ func TestHTTPClient_Delete(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		if err := client.Delete(context.Background(), "consumer"); err != nil {
-			t.Fatalf("Delete() returned error: %v", err)
-		}
+		require.NoError(t, client.Delete(context.Background(), "consumer"))
 	})
 
 	t.Run("should return error on unexpected status", func(t *testing.T) {
@@ -198,8 +152,6 @@ func TestHTTPClient_Delete(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		if err := client.Delete(context.Background(), "consumer"); err == nil {
-			t.Fatal("Delete() expected error for 500 response")
-		}
+		require.Error(t, client.Delete(context.Background(), "consumer"))
 	})
 }
