@@ -15,6 +15,12 @@ import (
 // readinessCheckInterval is how often a producer is re-checked for readiness.
 const readinessCheckInterval = 5 * time.Minute
 
+// serviceAccountClient manages service accounts on a specific producer.
+// Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
+type serviceAccountClient interface { //nolint:unused
+	producerclient.ServiceAccountClient
+}
+
 // producerClientFactory builds a client for a given ServiceAccountProducer, resolving the API key
 // from the referenced Kubernetes Secret.
 type producerClientFactory interface {

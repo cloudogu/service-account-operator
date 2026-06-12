@@ -34,7 +34,7 @@ type producerClientFactory interface {
 
 // serviceAccountClient manages service accounts on a specific producer.
 // Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
-type serviceAccountClient interface {
+type serviceAccountClient interface { //nolint:unused
 	producer.ServiceAccountClient
 }
 

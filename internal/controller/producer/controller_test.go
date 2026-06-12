@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
-	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -19,30 +18,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-// fakeClient is a hand-written test double for producerclient.ServiceAccountClient.
-// A generated mock is not used because that interface lives in another package, where mockery
-// places its mock in a non-importable _test.go file.
-type fakeClient struct {
-	readyErr error
-}
-
-func (f *fakeClient) Create(_ context.Context, _ string, _ producerclient.Params) (map[string]string, error) {
-	return nil, nil
-}
-
-func (f *fakeClient) Update(_ context.Context, _ string, _ producerclient.Params) (map[string]string, error) {
-	return nil, nil
-}
-
-func (f *fakeClient) Delete(_ context.Context, _ string) error { return nil }
-
-func (f *fakeClient) Ready(_ context.Context) error { return f.readyErr }
-
 func TestController_Reconcile(t *testing.T) {
 	t.Run("should set Ready=True and requeue when the producer is reachable", func(t *testing.T) {
 		rtClient := newClientWith(t, newTestSAPR("example-producer", "default"))
 		factory := newMockProducerClientFactory(t)
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(&fakeClient{}, nil)
+		saClient := newMockServiceAccountClient(t)
+		saClient.EXPECT().Ready(mock.Anything).Return(nil)
+		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
@@ -60,8 +42,9 @@ func TestController_Reconcile(t *testing.T) {
 	t.Run("should set Ready=False with ConnectionFailed when the endpoint is unreachable", func(t *testing.T) {
 		rtClient := newClientWith(t, newTestSAPR("example-producer", "default"))
 		factory := newMockProducerClientFactory(t)
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).
-			Return(&fakeClient{readyErr: errors.New("connection refused")}, nil)
+		saClient := newMockServiceAccountClient(t)
+		saClient.EXPECT().Ready(mock.Anything).Return(errors.New("connection refused"))
+		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory

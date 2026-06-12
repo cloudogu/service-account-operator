@@ -7,7 +7,6 @@ import (
 	"time"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
-	httpclient "github.com/cloudogu/service-account-operator/internal/producer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -20,30 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
-
-// mockHTTPClient is a hand-written test double for httpclient.HTTPClient.
-// A generated mock is not used here because the interface lives in a different package
-// and mockery places in-package mocks in non-importable _test.go files.
-type mockHTTPClient struct {
-	credentials map[string]string
-	err         error
-}
-
-func (m *mockHTTPClient) Create(_ context.Context, _ string, _ httpclient.Params) (map[string]string, error) {
-	return m.credentials, m.err
-}
-
-func (m *mockHTTPClient) Update(_ context.Context, _ string, _ httpclient.Params) (map[string]string, error) {
-	return m.credentials, m.err
-}
-
-func (m *mockHTTPClient) Delete(_ context.Context, _ string) error {
-	return m.err
-}
-
-func (m *mockHTTPClient) Ready(_ context.Context) error {
-	return m.err
-}
 
 // --- helpers ---
 
@@ -279,7 +254,8 @@ func TestController_Reconcile(t *testing.T) {
 			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
 			Build()
 
-		httpClientMock := &mockHTTPClient{err: errors.New("connection refused")}
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("connection refused"))
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
 		controller := New(rtClient, scheme)
@@ -305,7 +281,8 @@ func TestController_Reconcile(t *testing.T) {
 			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
 			Build()
 
-		httpClientMock := &mockHTTPClient{credentials: map[string]string{"username": "grafana-user", "password": "pass"}}
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
 
