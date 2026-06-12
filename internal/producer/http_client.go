@@ -16,9 +16,6 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
-// Params is the list of parameters forwarded to the producer when creating a service account.
-type Params []string
-
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.

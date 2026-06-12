@@ -1,16 +1,45 @@
 package producer
 
-import serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+import (
+	"fmt"
+	"sort"
+
+	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+)
+
+// Params is the list of parameters forwarded to the producer when creating a service account.
+type Params []string
 
 // NewParamsFromSpec converts a ServiceAccountRequestParams spec into Params for use with an HttpClient.
-// A nil spec returns nil.
-// TODO: How should Options (map[string][]string) be serialized into []string?
-// Options represent named attributes defined by the producer schema (ProducerParams.Attributes).
-// Possible conventions: CLI-style flags ("--role=admin"), key=value pairs, or a flat list.
-// Needs to be aligned with what producers actually expect before Options can be included here.
+// Options are serialized as --key=value flags (sorted by key for stable ordering, repeated for multi-value keys),
+// followed by positional Args. A nil spec returns nil.
 func NewParamsFromSpec(spec *serviceaccountv1.ServiceAccountRequestParams) Params {
 	if spec == nil {
 		return nil
 	}
-	return Params(spec.Args)
+
+	var result Params
+
+	// first add options: {"repo": ["x", "y"], "role": ["admin"]} => ["--repo=x", "--repo=y", "--role=admin"]
+	if len(spec.Options) > 0 {
+		keys := make([]string, 0, len(spec.Options))
+		for k := range spec.Options {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			for _, v := range spec.Options[k] {
+				result = append(result, fmt.Sprintf("--%s=%s", k, v))
+			}
+		}
+	}
+
+	// then append remaining args
+	result = append(result, spec.Args...)
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
