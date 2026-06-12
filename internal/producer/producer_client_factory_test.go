@@ -44,6 +44,18 @@ func newTestSAPR(name, namespace, endpoint string) *serviceaccountv1.ServiceAcco
 	}
 }
 
+func TestNewProducerClientFactory(t *testing.T) {
+	t.Run("should return a factory bound to the given client", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+		factory := NewProducerClientFactory(rtClient)
+
+		assert.NotNil(t, factory)
+		assert.Equal(t, rtClient, factory.rtClient)
+	})
+}
+
 func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 	t.Run("should return error when producer has no HTTP spec", func(t *testing.T) {
 		scheme := newTestScheme(t)

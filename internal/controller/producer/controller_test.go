@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestController_Reconcile(t *testing.T) {
@@ -94,6 +95,58 @@ func TestController_Reconcile(t *testing.T) {
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 		assert.Equal(t, serviceaccountv1.ConditionReadyReasonInvalidConfiguration, cond.Reason)
+	})
+
+	t.Run("should return error when status.notReady write fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(newTestSAPR("example-producer", "default")).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return errors.New("status patch failed")
+				},
+			}).
+			Build()
+		factory := newMockProducerClientFactory(t)
+		saClient := newMockServiceAccountClient(t)
+		saClient.EXPECT().Ready(mock.Anything).Return(errors.New("connection refused"))
+		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+
+		controller := New(rtClient)
+		controller.clientFactory = factory
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status patch failed")
+	})
+
+	t.Run("should return error when status.ready write fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(newTestSAPR("example-producer", "default")).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return errors.New("status patch failed")
+				},
+			}).
+			Build()
+		factory := newMockProducerClientFactory(t)
+		saClient := newMockServiceAccountClient(t)
+		saClient.EXPECT().Ready(mock.Anything).Return(nil)
+		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+
+		controller := New(rtClient)
+		controller.clientFactory = factory
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status patch failed")
 	})
 
 	t.Run("should ignore not found", func(t *testing.T) {

@@ -16,7 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -271,6 +273,214 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	})
 
+	t.Run("should return error when adding finalizer fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					return errors.New("etcd unavailable")
+				},
+			}).
+			Build()
+		controller := New(rtClient, scheme)
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to add finalizer")
+	})
+
+	t.Run("should return error when getProducer fails with a non-not-found error", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*serviceaccountv1.ServiceAccountProducer); ok {
+						return errors.New("etcd connection lost")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).
+			Build()
+		controller := New(rtClient, scheme)
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get producer")
+	})
+
+	t.Run("should return error and set ServiceAccountReady=False when secret storage fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).
+			Return(map[string]string{"key": "val"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(mock.Anything, mock.Anything).Return(false, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(mock.Anything, mock.Anything, mock.Anything).
+			Return("", errors.New("disk full"))
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to store credentials")
+		var updated serviceaccountv1.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	})
+
+	t.Run("should return original error when fail() cannot update the status condition", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return errors.New("status patch failed")
+				},
+			}).
+			Build()
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("auth secret not found"))
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "auth secret not found")
+	})
+
+	t.Run("should return error when producerReady status update fails after successful create", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					return errors.New("status patch failed")
+				},
+			}).
+			Build()
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).
+			Return(map[string]string{"key": "val"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(mock.Anything, mock.Anything).Return(false, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(mock.Anything, mock.Anything, mock.Anything).Return("grafana-to-prometheus", nil)
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to update status after successful create")
+	})
+
+	t.Run("should return error when serviceAccountReady status update fails after successful create", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		patchCount := 0
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					patchCount++
+					if patchCount == 1 {
+						return c.Status().Patch(ctx, obj, patch, opts...)
+					}
+					return errors.New("status patch failed on second call")
+				},
+			}).
+			Build()
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).
+			Return(map[string]string{"key": "val"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(mock.Anything, mock.Anything, mock.Anything).Return(httpClientMock, nil)
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(mock.Anything, mock.Anything).Return(false, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(mock.Anything, mock.Anything, mock.Anything).Return("grafana-to-prometheus", nil)
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to update status after successful create")
+	})
+
+	t.Run("should return nil when SARE is being deleted but does not carry the correct finalizer", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		now := metav1.NewTime(time.Now())
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sare.DeletionTimestamp = &now
+		sare.Finalizers = []string{"some-other-controller/finalizer"} // fake client requires at least one finalizer when DeletionTimestamp is set
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		controller := New(rtClient, scheme)
+
+		result, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+	})
+
+	t.Run("should return error when removing finalizer fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		now := metav1.NewTime(time.Now())
+		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
+		sare.DeletionTimestamp = &now
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					return errors.New("update denied")
+				},
+			}).
+			Build()
+		controller := New(rtClient, scheme)
+
+		_, err := controller.Reconcile(context.Background(), reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to remove finalizer")
+	})
+
 	t.Run("should create secret and update status with Ready conditions on success", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSAREWithFinalizer("grafana-to-prometheus", "ecosystem", "prometheus", false)
@@ -338,6 +548,24 @@ func TestController_EnqueueRequestsForProducer(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-alertmanager", "ecosystem", "alertmanager", false)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		controller := New(rtClient, scheme)
+
+		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
+		requests := controller.enqueueRequestsForProducer(context.Background(), sapr)
+
+		assert.Empty(t, requests)
+	})
+
+	t.Run("should return empty list when client.List fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					return errors.New("etcd unavailable")
+				},
+			}).
+			Build()
 		controller := New(rtClient, scheme)
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")

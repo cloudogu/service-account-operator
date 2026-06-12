@@ -84,6 +84,29 @@ func TestHTTPClient_Create(t *testing.T) {
 
 		require.Error(t, err)
 	})
+
+	t.Run("should return error when producer response body is not valid JSON", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("not-json"))
+		}))
+		defer server.Close()
+
+		client := NewHTTPClient(server.URL, "key")
+		_, err := client.Create(context.Background(), "consumer", nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode producer response")
+	})
+}
+
+func TestHTTPClient_Update(t *testing.T) {
+	t.Run("should panic because Update is not yet implemented", func(t *testing.T) {
+		client := NewHTTPClient("http://example.com", "key")
+		assert.Panics(t, func() {
+			_, _ = client.Update(context.Background(), "consumer", nil)
+		})
+	})
 }
 
 func TestHTTPClient_Ready(t *testing.T) {
@@ -152,6 +175,16 @@ func TestHTTPClient_Delete(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
+		require.Error(t, client.Delete(context.Background(), "consumer"))
+	})
+
+	t.Run("should return error when endpoint is unreachable", func(t *testing.T) {
+		client := NewHTTPClient("http://127.0.0.1:1", "key")
+		require.Error(t, client.Delete(context.Background(), "consumer"))
+	})
+
+	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
+		client := NewHTTPClient("http://[invalid", "key")
 		require.Error(t, client.Delete(context.Background(), "consumer"))
 	})
 }

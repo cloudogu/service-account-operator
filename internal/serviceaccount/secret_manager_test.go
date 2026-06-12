@@ -2,6 +2,7 @@ package serviceaccount
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
@@ -11,7 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -73,6 +76,29 @@ func TestSecretManager_Exists(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.False(t, exists)
+	})
+
+	t.Run("should return error when client returns unexpected error", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.Secret); ok {
+						return errors.New("etcd connection refused")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).
+			Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		_, err := sm.Exists(context.Background(), sare)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to check for existing secret")
 	})
 
 	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
@@ -179,6 +205,29 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		var secret corev1.Secret
 		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
 		assert.Equal(t, "new-user", secret.StringData["username"])
+	})
+
+	t.Run("should return error when secret creation fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if _, ok := obj.(*corev1.Secret); ok {
+						return errors.New("permission denied")
+					}
+					return c.Create(ctx, obj, opts...)
+				},
+			}).
+			Build()
+
+		sm := NewSecretManager(rtClient, scheme)
+		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create or update secret")
 	})
 }
 
