@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type SecretManager struct {
@@ -68,4 +69,18 @@ func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccoun
 	}
 
 	return secretName, nil
+}
+
+func (sm *SecretManager) Delete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+	secretName := resolveSecretName(sare)
+	err := sm.client.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: sare.Namespace}})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name).Info(fmt.Sprintf("secret %q not found, skipping deletion", secretName))
+			return nil
+		}
+		return fmt.Errorf("failed to delete secret %q for service account request %q: %w", secretName, sare.Name, err)
+	}
+
+	return nil
 }

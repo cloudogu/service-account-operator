@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,9 +12,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -585,4 +588,356 @@ func TestController_EnqueueRequestsForProducer(t *testing.T) {
 
 		assert.Empty(t, requests)
 	})
+}
+
+const (
+	testNamespace         = "ecosystem"
+	testReqName           = "grafana"
+	testPrName            = "prometheus"
+	testConsumer          = "grafana"
+	testQualifiedConsumer = "grafana-ecosystem"
+)
+
+func TestController_reconcileDelete(t *testing.T) {
+	type fields struct {
+		client                func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer)
+		secretManager         func(t *testing.T) secretManager
+		producerClientFactory func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory
+	}
+	type args struct {
+		sare *serviceaccountv1.ServiceAccountRequest
+	}
+
+	testSare := &serviceaccountv1.ServiceAccountRequest{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testReqName, Finalizers: []string{"k8s.cloudogu.com/service-account-request-finalizer"}}, Spec: serviceaccountv1.ServiceAccountRequestSpec{Producer: testPrName, Consumer: testConsumer}}
+
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should skip if no finalizer is present",
+			args: args{
+				sare: &serviceaccountv1.ServiceAccountRequest{},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil on successful deletion",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientUpdateSare(t, sClient, nil)
+					expectClientPatchStatus(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, nil, nil)
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting service account secret",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, assert.AnError)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to delete secret for service account request \"grafana\":")
+			},
+		},
+		{
+			name: "should return nil if producer is not found",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientUpdateSare(t, sClient, nil)
+
+					return sClient, nil
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil if the request does not exists anymore while deleting the finalizer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientUpdateSare(t, sClient, errors2.NewNotFound(schema.GroupResource{Group: "", Resource: ""}, "sare"))
+
+					return sClient, nil
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting the finalizer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientUpdateSare(t, sClient, assert.AnError)
+
+					return sClient, nil
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to remove finalizer from service account request \"grafana\":")
+			},
+		},
+		{
+			name: "should return error on error getting producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					expectClientGetProducer(sClient, nil, assert.AnError)
+					return sClient, nil
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to get producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return error on error getting service account client",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, nil, nil, assert.AnError)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to build service account client for producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return error on error checking if service account exists",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, assert.AnError, nil, nil)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to check if service account \"grafana\" exists at producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return nil if the service account does not exist in the producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientUpdateSare(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, nil, nil, nil)
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting the service account at the producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, assert.AnError, nil)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to delete service account \"grafana\" at producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return nil if the update status of the producer fails",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				secretManager: func(t *testing.T) secretManager {
+					return mockSecretManagerDelete(t, testSare, nil)
+				},
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv1.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientPatchStatus(t, sClient, assert.AnError)
+					expectClientUpdateSare(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, nil, nil)
+				},
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Controller{}
+			sapr := &serviceaccountv1.ServiceAccountProducer{}
+			ctx := context.Background()
+			if tt.fields.client != nil {
+				c.client, sapr = tt.fields.client(t)
+			}
+			if tt.fields.secretManager != nil {
+				c.secretManager = tt.fields.secretManager(t)
+			}
+			if tt.fields.producerClientFactory != nil {
+				c.producerClientFactory = tt.fields.producerClientFactory(t, sapr)
+			}
+
+			sare := &serviceaccountv1.ServiceAccountRequest{}
+			if tt.args.sare != nil {
+				sare = tt.args.sare.DeepCopy()
+			}
+
+			tt.wantErr(t, c.reconcileDelete(ctx, sare), fmt.Sprintf("reconcileDelete(%v, %v)", ctx, tt.args.sare))
+		})
+	}
+}
+
+func mockSecretManagerDelete(t *testing.T, sare *serviceaccountv1.ServiceAccountRequest, err error) secretManager {
+	manager := newMockSecretManager(t)
+	manager.EXPECT().Delete(mock.Anything, sare).Return(err)
+	return manager
+}
+
+func expectClientGetProducer(c *mockK8sClient, sapr *serviceaccountv1.ServiceAccountProducer, err error) {
+	c.EXPECT().Get(mock.Anything, types.NamespacedName{Namespace: testNamespace, Name: testPrName}, mock.IsType(&serviceaccountv1.ServiceAccountProducer{})).
+		Run(func(ctx context.Context, key types.NamespacedName, obj client.Object, opts ...client.GetOption) {
+			if err == nil && sapr != nil {
+				*obj.(*serviceaccountv1.ServiceAccountProducer) = *sapr
+			}
+		}).Return(err)
+}
+
+func expectClientUpdateSare(t *testing.T, c *mockK8sClient, err error) {
+	c.EXPECT().Update(mock.Anything, mock.IsType(&serviceaccountv1.ServiceAccountRequest{})).
+		Run(func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) {
+			if err == nil {
+				updatedSaReq := obj.(*serviceaccountv1.ServiceAccountRequest)
+				assert.Empty(t, updatedSaReq.Finalizers)
+			}
+		}).Return(err)
+}
+
+func expectClientPatchStatus(t *testing.T, c *mockK8sClient, err error) {
+	statusClient := NewMockStatusClient(t)
+	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv1.ServiceAccountProducer{}), mock.Anything).
+		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
+			if err == nil {
+				data, patchErr := patch.Data(obj)
+				require.NoError(t, patchErr)
+				assert.Contains(t, string(data), `{"status":{"lastExecution"`)
+			}
+		}).Return(err)
+	c.EXPECT().Status().Return(statusClient)
+}
+
+func mockProducerFactory(t *testing.T, sapr *serviceaccountv1.ServiceAccountProducer, exists bool, existsErr, deleteErr, factoryErr error) producerClientFactory {
+	factory := newMockProducerClientFactory(t)
+	if factoryErr != nil {
+		factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(nil, factoryErr)
+		return factory
+	}
+
+	saClient := newMockServiceAccountClient(t)
+	saClient.EXPECT().Exists(mock.Anything, testQualifiedConsumer).Return(exists, existsErr)
+	if existsErr == nil && exists {
+		saClient.EXPECT().Delete(mock.Anything, testQualifiedConsumer).Return(deleteErr)
+	}
+
+	factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(saClient, nil)
+	return factory
 }

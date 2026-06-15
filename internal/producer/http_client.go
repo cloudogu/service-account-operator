@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -27,6 +29,8 @@ type ServiceAccountClient interface {
 	Delete(ctx context.Context, consumer string) error
 	// Ready returns nil when the producer endpoint is reachable
 	Ready(ctx context.Context) error
+	// Exists returns true if the service account exists at the producer.
+	Exists(ctx context.Context, consumer string) (bool, error)
 }
 
 // HttpClient is an HTTP client bound to a specific producer endpoint and API key.
@@ -48,6 +52,35 @@ func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 type createRequestBody struct {
 	Consumer string `json:"consumer"`
 	Params   Params `json:"params,omitempty"`
+}
+
+func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.endpoint, http.NoBody)
+	if err != nil {
+		return false, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(apiKeyHeader, c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("HTTP request to producer %q failed: %w", c.endpoint, err)
+	}
+	defer func() {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			logf.FromContext(ctx).Error(closeErr, "failed to close producer response body", "consumer", consumer, "endpoint", c.endpoint)
+		}
+	}()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("producer returned unexpected status %d for %q", resp.StatusCode, c.endpoint)
+	}
 }
 
 // Create calls POST {endpoint} to create a service account and returns the credentials.

@@ -3,11 +3,13 @@ package request
 import (
 	"context"
 	"fmt"
+	"time"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -24,6 +26,7 @@ const finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
 type secretManager interface {
 	Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error)
 	CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error)
+	Delete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error
 }
 
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
@@ -32,20 +35,28 @@ type producerClientFactory interface {
 	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (producer.ServiceAccountClient, error)
 }
 
+type k8sClient interface {
+	client.Client
+}
+
 // serviceAccountClient manages service accounts on a specific producer.
 // Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
 type serviceAccountClient interface { //nolint:unused
 	producer.ServiceAccountClient
 }
 
+type StatusClient interface {
+	client.SubResourceWriter
+}
+
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
-	client                client.Client
+	client                k8sClient
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
 }
 
-func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
+func New(rtClient k8sClient, scheme *runtime.Scheme) *Controller {
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
@@ -106,9 +117,9 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
-	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, status, err)
 	}
 
 	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), producer.NewParamsFromSpec(sare.Spec.Params))
@@ -133,6 +144,15 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 	return ctrl.Result{}, nil
 }
 
+func (c *Controller) getServiceAccountClient(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, sapr *serviceaccountv1.ServiceAccountProducer) (serviceAccountClient, error) {
+	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service account client for producer %q: %w", sapr.Name, err)
+	}
+
+	return saClient, nil
+}
+
 // fail records a failed ServiceAccountReady condition and returns the original
 // error so the reconcile is retried with backoff.
 func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) error {
@@ -148,12 +168,16 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 		return nil
 	}
 
-	// TODO Persistent error during service account deletion freezes the cr. This could be annoying during cleanups.
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
-		return err
+		return fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
 	}
+
 	controllerutil.RemoveFinalizer(sare, finalizer)
 	if err := c.client.Update(ctx, sare); err != nil {
+		// Prevent resource not found error produced by informer cache lag.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to remove finalizer from service account request %q: %w", sare.Name, err)
 	}
 
@@ -161,7 +185,54 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 }
 
 func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
-	logf.FromContext(ctx).Info("delete not yet implemented, skipping", "serviceAccountRequest", sare.Name)
+	logger := logf.FromContext(ctx)
+	logger.Info("deleting service account", "serviceAccount", sare.Spec.Consumer)
+
+	err := c.secretManager.Delete(ctx, sare)
+	if err != nil {
+		return fmt.Errorf("failed to delete secret for service account request %q: %w", sare.Name, err)
+	}
+
+	var sapr *serviceaccountv1.ServiceAccountProducer
+	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("producer not found, skipping deletion of service account at producer", "producer", sare.Spec.Producer, "request", sare.Name)
+			return nil
+		}
+
+		return fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	}
+
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	if err != nil {
+		return err
+	}
+
+	consumer := qualifiedConsumer(sare)
+	exists, err := saClient.Exists(ctx, consumer)
+	if err != nil {
+		return fmt.Errorf("failed to check if service account %q exists at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
+	}
+
+	if !exists {
+		logger.Info("service account not found at producer, skipping deletion", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+		return nil
+	}
+
+	err = saClient.Delete(ctx, consumer)
+	if err != nil {
+		return fmt.Errorf("failed to delete service account %q at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
+	}
+	logger.Info("deleted service account", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+
+	original := sapr.DeepCopy()
+	sapr.Status.LastExecution = metav1.NewTime(time.Now())
+	err = c.client.Status().Patch(ctx, sapr, client.MergeFrom(original))
+	if err != nil {
+		logger.Error(err, "failed to patch lastExecution status after successful delete", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+	}
+
 	return nil
 }
 
