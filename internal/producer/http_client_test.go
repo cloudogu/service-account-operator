@@ -188,3 +188,72 @@ func TestHTTPClient_Delete(t *testing.T) {
 		require.Error(t, client.Delete(context.Background(), "consumer"))
 	})
 }
+
+func TestHttpClient_Exists(t *testing.T) {
+	tests := []struct {
+		name    string
+		server  func() *httptest.Server
+		want    bool
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return true on status code 200",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusOK)
+				}))
+			},
+			want:    true,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return false on status code 404",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusNotFound)
+				}))
+			},
+			want:    false,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on other status codes than 200 or 404",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusInternalServerError)
+				}))
+			},
+			want: false,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "producer returned unexpected status 500 for")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			server := tt.server()
+			defer server.Close()
+
+			c := &HttpClient{
+				client:   &http.Client{Timeout: defaultTimeout},
+				endpoint: server.URL,
+				apiKey:   "api-key",
+			}
+			got, err := c.Exists(context.Background(), "grafana")
+			if !tt.wantErr(t, err) {
+				return
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
