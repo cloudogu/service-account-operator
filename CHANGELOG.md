@@ -8,3 +8,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - [#3] Reconcile `ServiceAccountRequest` resources: create service accounts via the producer HTTP API and store credentials in a Kubernetes Secret
+- [#5] Deletion of `ServiceAccountRequest` resources.
