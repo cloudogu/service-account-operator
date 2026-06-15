@@ -55,7 +55,11 @@ type createRequestBody struct {
 }
 
 func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.endpoint, http.NoBody)
+	targetURL, err := url.JoinPath(c.endpoint, consumer)
+	if err != nil {
+		return false, fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}

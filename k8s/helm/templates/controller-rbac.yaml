@@ -25,6 +25,7 @@ rules:
       - update
       - list
       - watch
+      - delete
   - apiGroups:
       - k8s.cloudogu.com
     resources:
