@@ -169,7 +169,8 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 	}
 
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
-		return fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
+		wrapErr := fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
+		return c.fail(ctx, newStatusWriter(c.client, sare), wrapErr)
 	}
 
 	controllerutil.RemoveFinalizer(sare, finalizer)
