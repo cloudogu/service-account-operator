@@ -15,13 +15,17 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+type k8sClient interface {
+	client.Client
+}
+
 type SecretManager struct {
-	client client.Client
+	client k8sClient
 	scheme *runtime.Scheme
 }
 
 // NewSecretManager creates a SecretManager that writes Secrets in the cluster.
-func NewSecretManager(c client.Client, scheme *runtime.Scheme) *SecretManager {
+func NewSecretManager(c k8sClient, scheme *runtime.Scheme) *SecretManager {
 	return &SecretManager{client: c, scheme: scheme}
 }
 
