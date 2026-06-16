@@ -164,13 +164,14 @@ func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) 
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+	status := newStatusWriter(c.client, sare)
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}
 
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
 		wrapErr := fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
-		return c.fail(ctx, newStatusWriter(c.client, sare), wrapErr)
+		return c.fail(ctx, status, wrapErr)
 	}
 
 	controllerutil.RemoveFinalizer(sare, finalizer)
