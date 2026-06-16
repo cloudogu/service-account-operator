@@ -80,7 +80,7 @@ func (sm *SecretManager) Delete(ctx context.Context, sare *serviceaccountv1.Serv
 	err := sm.client.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: sare.Namespace}})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name).Info(fmt.Sprintf("secret %q not found, skipping deletion", secretName))
+			logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name).Info(fmt.Sprintf("secret %q not found, skipping deletion but continue process", secretName))
 			return nil
 		}
 		return fmt.Errorf("failed to delete secret %q for service account request %q: %w", secretName, sare.Name, err)
