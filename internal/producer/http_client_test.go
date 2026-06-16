@@ -125,17 +125,23 @@ func TestHTTPClient_Ready(t *testing.T) {
 	t.Run("should return error when endpoint is unreachable", func(t *testing.T) {
 		// Port 1 on loopback is not listening, so the connection is refused immediately.
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		require.Error(t, client.Ready(context.Background()))
+		actualErr := client.Ready(context.Background())
+
+		require.Error(t, actualErr)
+		assert.ErrorContains(t, err, `endpoint "http://127.0.0.1:1" is not reachable`)
 	})
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		require.Error(t, client.Ready(context.Background()))
+		actualErr := client.Ready(context.Background())
+
+		require.Error(t, actualErr)
+		assert.ErrorContains(t, err, `failed to build readiness probe request for "://invalid"`)
 	})
 }
 
 func TestHTTPClient_Delete(t *testing.T) {
-	t.Run("should send DELETE request and succeed on 200", func(t *testing.T) {
+	t.Run("should send DELETE request and succeed on 200 OK", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodDelete, r.Method)
 			assert.Equal(t, "/grafana", r.URL.Path)
@@ -158,7 +164,7 @@ func TestHTTPClient_Delete(t *testing.T) {
 		require.NoError(t, client.Delete(context.Background(), "consumer"))
 	})
 
-	t.Run("should treat 404 as success since the account is already gone", func(t *testing.T) {
+	t.Run("should treat 404 Not Found as success since the account is already gone", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))

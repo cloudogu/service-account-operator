@@ -16,7 +16,7 @@ import (
 const readinessCheckInterval = 5 * time.Minute
 
 // serviceAccountClient manages service accounts on a specific producer.
-// Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
+// Defined here for mock generation.
 type serviceAccountClient interface { //nolint:unused
 	producerclient.ServiceAccountClient
 }

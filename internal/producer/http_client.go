@@ -13,7 +13,7 @@ import (
 
 const (
 	apiKeyHeader   = "X-CES-SA-API-KEY"
-	defaultTimeout = 30 * time.Second
+	defaultTimeout30secs = 30 * time.Second
 )
 
 // ServiceAccountClient manages service accounts on a specific producer.
@@ -21,7 +21,6 @@ type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Update re-provisions an existing service account and returns the refreshed credentials.
-	// Not yet implemented — requires a PUT endpoint on the producer side.
 	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
@@ -50,7 +49,7 @@ type createRequestBody struct {
 	Params   Params `json:"params,omitempty"`
 }
 
-// Create calls POST {endpoint} to create a service account and returns the credentials.
+// Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
 	if err != nil {
@@ -88,9 +87,9 @@ func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]s
 	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
 }
 
-// Ready probes the producer endpoint with a HEAD request. Any HTTP response — even 4xx/5xx —
-// counts as reachable; only transport errors (DNS failure, connection refused, missing netpols)
-// mean the endpoint is unreachable.
+// Ready checks the producer endpoint for basic readiness and returns an error if the endpoint is
+// unreachable. Readiness includes _any_ HTTP response; transport errors (DNS failure, connection
+// refused, missing netpols) count as unreachable.
 func (c *HttpClient) Ready(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.endpoint, nil)
 	if err != nil {
@@ -107,7 +106,7 @@ func (c *HttpClient) Ready(ctx context.Context) error {
 	return nil
 }
 
-// Delete calls DELETE {endpoint}/{consumer} to remove a service account.
+// Delete removes a consumer's service account from the service account producer.
 func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
