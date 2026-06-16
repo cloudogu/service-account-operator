@@ -6,6 +6,7 @@ import (
 	"time"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,7 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
+const (
+	finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
+)
 
 // secretManager manages the Kubernetes Secret that holds a service account's credentials.
 type secretManager interface {
@@ -54,13 +57,15 @@ type Controller struct {
 	client                k8sClient
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
+	operatorConfig        *config.OperatorConfig
 }
 
-func New(rtClient k8sClient, scheme *runtime.Scheme) *Controller {
+func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig) *Controller {
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
 		producerClientFactory: producer.NewProducerClientFactory(rtClient),
+		operatorConfig:        operatorConfig,
 	}
 }
 
@@ -169,9 +174,22 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1
 		return nil
 	}
 
+	if time.Since(sare.DeletionTimestamp.Time) > c.operatorConfig.DeletionTimeout {
+		logf.FromContext(ctx).Info("deletion timeout reached, dropping finalizer to avoid hanging resource", "serviceAccountRequest", sare.Name)
+		return c.removeFinalizer(ctx, sare)
+	}
+
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
 		wrapErr := fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
 		return c.fail(ctx, status, wrapErr)
+	}
+
+	return c.removeFinalizer(ctx, sare)
+}
+
+func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+	if !controllerutil.ContainsFinalizer(sare, finalizer) {
+		return nil
 	}
 
 	controllerutil.RemoveFinalizer(sare, finalizer)

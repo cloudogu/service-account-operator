@@ -3,17 +3,19 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
-	StageDevelopment = "development"
-	StageProduction  = "production"
-	StageEnvVar      = "STAGE"
-	namespaceEnvVar  = "NAMESPACE"
-	logLevelEnvVar   = "LOG_LEVEL"
+	StageDevelopment      = "development"
+	StageProduction       = "production"
+	StageEnvVar           = "STAGE"
+	namespaceEnvVar       = "NAMESPACE"
+	logLevelEnvVar        = "LOG_LEVEL"
+	deletionTimeoutEnvVar = "DELETION_TIMEOUT"
 )
 
 var log = ctrl.Log.WithName("config")
@@ -30,6 +32,9 @@ type OperatorConfig struct {
 
 	// ControllerOptions contains the controller-runtime manager configuration.
 	ControllerOptions ctrl.Options
+
+	// DeletionTimeout is the time to wait for a resource to be deleted before giving up.
+	DeletionTimeout time.Duration
 }
 
 // NewOperatorConfig builds the operator runtime configuration from environment and flags.
@@ -43,10 +48,31 @@ func NewOperatorConfig(scheme *runtime.Scheme) (*OperatorConfig, error) {
 
 	log.Info(fmt.Sprintf("deploying the service-account-operator in namespace %s", namespace))
 
+	deletionTimeout, err := getDeletionTimeout()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read deletion timeout: %w", err)
+	}
+	log.Info(fmt.Sprintf("using deletion timeout %s to avoid hanging resources", deletionTimeout))
+
 	return &OperatorConfig{
 		Namespace:         namespace,
 		ControllerOptions: getControllerOptions(scheme, namespace),
+		DeletionTimeout:   deletionTimeout,
 	}, nil
+}
+
+func getDeletionTimeout() (time.Duration, error) {
+	deletionTimeout, err := getEnvVar(deletionTimeoutEnvVar)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get env var [%s]: %w", deletionTimeoutEnvVar, err)
+	}
+
+	deletionTimeoutDuration, err := time.ParseDuration(deletionTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse env var [%s] with value [%s]: %w", deletionTimeoutEnvVar, deletionTimeout, err)
+	}
+
+	return deletionTimeoutDuration, nil
 }
 
 func configureStage() {
