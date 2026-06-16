@@ -61,6 +61,7 @@ func TestNewOperatorConfig(t *testing.T) {
 		})
 		t.Setenv(StageEnvVar, StageDevelopment)
 		t.Setenv(namespaceEnvVar, "ecosystem")
+		t.Setenv(deletionTimeoutEnvVar, "24h")
 
 		oldStage := Stage
 		oldLog := log
@@ -74,6 +75,7 @@ func TestNewOperatorConfig(t *testing.T) {
 		logMock.EXPECT().Enabled(0).Return(true).Maybe()
 		logMock.EXPECT().Info(0, "starting in development mode").Return()
 		logMock.EXPECT().Info(0, "deploying the service-account-operator in namespace ecosystem").Return()
+		logMock.EXPECT().Info(0, "using deletion timeout 24h0m0s to avoid hanging resources").Return()
 		log = logr.New(logMock)
 
 		actual, err := NewOperatorConfig(testScheme)
