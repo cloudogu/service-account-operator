@@ -628,6 +628,21 @@ func TestController_reconcileDelete(t *testing.T) {
 			wantErr: assert.NoError,
 		},
 		{
+			name: "should remove finalizer if timeout is reached",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv1.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+					return sClient, nil
+				},
+				operatorConfig: &config.OperatorConfig{DeletionTimeout: time.Nanosecond},
+			},
+			wantErr: assert.NoError,
+		},
+		{
 			name: "should return nil on successful deletion",
 			args: args{
 				sare: testSare,
@@ -889,10 +904,10 @@ func TestController_reconcileDelete(t *testing.T) {
 			if tt.fields.producerClientFactory != nil {
 				c.producerClientFactory = tt.fields.producerClientFactory(t, sapr)
 			}
+
+			c.operatorConfig = &config.OperatorConfig{DeletionTimeout: time.Minute}
 			if tt.fields.operatorConfig != nil {
 				c.operatorConfig = tt.fields.operatorConfig
-			} else {
-				c.operatorConfig = &config.OperatorConfig{DeletionTimeout: time.Minute}
 			}
 
 			sare := &serviceaccountv1.ServiceAccountRequest{}
