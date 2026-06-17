@@ -294,7 +294,7 @@ func TestHttpClient_Exists(t *testing.T) {
 			defer server.Close()
 
 			c := &HttpClient{
-				client:   &http.Client{Timeout: defaultTimeout},
+				client:   &http.Client{Timeout: defaultTimeout30secs},
 				endpoint: server.URL,
 				apiKey:   "api-key",
 			}
