@@ -43,7 +43,7 @@ type k8sClient interface {
 }
 
 // serviceAccountClient manages service accounts on a specific producer.
-// Defined here for mock generation — structurally identical to producer.ServiceAccountClient.
+// Defined here for mock generation
 type serviceAccountClient interface { //nolint:unused
 	producer.ServiceAccountClient
 }
@@ -64,23 +64,31 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
-		producerClientFactory: producer.NewProducerClientFactory(rtClient),
+		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
 	var sare serviceaccountv1.ServiceAccountRequest
 	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
+		logger.Error(err, "failed to get service account request")
+
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	if !sare.DeletionTimestamp.IsZero() {
+		logger.Info("service account request needs to be deleted")
+
 		return ctrl.Result{}, c.reconcileDelete(ctx, &sare)
 	}
 
 	if controllerutil.AddFinalizer(&sare, finalizer) {
 		if err := c.client.Update(ctx, &sare); err != nil {
+			logger.Error(err, "failed to add finalizer to service account request")
+
 			return ctrl.Result{}, fmt.Errorf("failed to add finalizer to service account request %q: %w", sare.Name, err)
 		}
 		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
@@ -88,12 +96,18 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	exists, err := c.secretManager.Exists(ctx, &sare)
 	if err != nil {
+		logger.Error(err, "failed to check if service account secret exists")
+
 		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
 	}
 
 	if exists {
+		logger.Info("service account request needs to be updated")
+
 		return c.reconcileUpdate(ctx, &sare)
 	}
+
+	logger.Info("service account request needs to be created")
 
 	return c.reconcileCreate(ctx, &sare)
 }

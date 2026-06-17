@@ -10,14 +10,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// DefaultProducerClientFactory creates ServiceAccountClient instances for ServiceAccountProducer resources.
 type DefaultProducerClientFactory struct {
 	rtClient client.Client
 }
 
-func NewProducerClientFactory(rtClient client.Client) *DefaultProducerClientFactory {
+// NewClientFactory creates a DefaultProducerClientFactory backed by the given controller-runtime client.
+func NewClientFactory(rtClient client.Client) *DefaultProducerClientFactory {
 	return &DefaultProducerClientFactory{rtClient: rtClient}
 }
 
+// NewForProducer returns a ServiceAccountClient configured for the given producer's HTTP endpoint and API key.
 func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (ServiceAccountClient, error) {
 	if sapr.Spec.HTTP == nil {
 		return nil, fmt.Errorf("producer %q has no HTTP spec configured", sapr.Name)

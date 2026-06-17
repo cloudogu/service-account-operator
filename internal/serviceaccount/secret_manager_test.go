@@ -21,6 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+var testCtx = context.Background()
+
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -47,7 +49,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(context.Background(), sare)
+		exists, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.False(t, exists)
@@ -60,7 +62,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(context.Background(), sare)
+		exists, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
@@ -75,7 +77,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(context.Background(), sare)
+		exists, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.False(t, exists)
@@ -98,7 +100,7 @@ func TestSecretManager_Exists(t *testing.T) {
 			Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.Exists(context.Background(), sare)
+		_, err := sm.Exists(testCtx, sare)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to check for existing secret")
@@ -112,7 +114,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(context.Background(), sare)
+		exists, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
@@ -128,13 +130,13 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		sm := NewSecretManager(rtClient, scheme)
 		creds := map[string]string{"username": "user1", "password": "pass1"}
 
-		secretName, err := sm.CreateOrUpdate(context.Background(), sare, creds)
+		secretName, err := sm.CreateOrUpdate(testCtx, sare, creds)
 
 		require.NoError(t, err)
 		assert.Equal(t, "grafana-to-prometheus", secretName)
 
 		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
 		assert.Equal(t, "user1", secret.StringData["username"])
 		assert.Equal(t, "pass1", secret.StringData["password"])
 	})
@@ -147,13 +149,13 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 
-		secretName, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"apiKey": "abc"})
+		secretName, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"apiKey": "abc"})
 
 		require.NoError(t, err)
 		assert.Equal(t, "custom-prometheus-creds", secretName)
 
 		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "custom-prometheus-creds", Namespace: "ecosystem"}, &secret))
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "custom-prometheus-creds", Namespace: "ecosystem"}, &secret))
 	})
 
 	t.Run("should set owner reference pointing to the SARE", func(t *testing.T) {
@@ -163,11 +165,11 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
+		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"key": "val"})
 		require.NoError(t, err)
 
 		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
 		require.Len(t, secret.OwnerReferences, 1)
 		assert.Equal(t, "grafana-to-prometheus", secret.OwnerReferences[0].Name)
 		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
@@ -183,11 +185,11 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
+		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"key": "val"})
 		require.NoError(t, err)
 
 		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
 		require.Len(t, secret.OwnerReferences, 1)
 		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
 	})
@@ -202,11 +204,11 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"username": "new-user", "password": "new-pass"})
+		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"username": "new-user", "password": "new-pass"})
 		require.NoError(t, err)
 
 		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
 		assert.Equal(t, "new-user", secret.StringData["username"])
 	})
 
@@ -227,7 +229,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 			Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.CreateOrUpdate(context.Background(), sare, map[string]string{"key": "val"})
+		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"key": "val"})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create or update secret")

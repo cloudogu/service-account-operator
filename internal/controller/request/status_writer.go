@@ -10,22 +10,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// statusWriter buffers condition changes on a ServiceAccountRequest and patches the status
-// subresource in one go. It captures a snapshot of the SARE at construction time so each
-// patch only contains the actual status diff.
+// statusWriter buffers condition changes on a ServiceAccountRequest and patches the status subresource in one go.
+// It captures a snapshot of the SARE at construction time so each patch only contains the actual status diff.
 type statusWriter struct {
-	client client.Client
-	sare   *serviceaccountv1.ServiceAccountRequest
-	before *serviceaccountv1.ServiceAccountRequest
+	client    client.Client
+	sare      *serviceaccountv1.ServiceAccountRequest
+	patchBase *serviceaccountv1.ServiceAccountRequest
 }
 
 // newStatusWriter snapshots the SARE and returns a writer for its status conditions.
-// Create it before mutating the SARE's status.
+// Create it patchBase mutating the SARE's status.
 func newStatusWriter(c client.Client, sare *serviceaccountv1.ServiceAccountRequest) *statusWriter {
 	return &statusWriter{
-		client: c,
-		sare:   sare,
-		before: sare.DeepCopy(),
+		client:    c,
+		sare:      sare,
+		patchBase: sare.DeepCopy(),
 	}
 }
 
@@ -55,7 +54,7 @@ func (s *statusWriter) serviceAccountFailed(ctx context.Context, err error) erro
 }
 
 // setAndPersist sets a condition on the SARE and patches the status subresource.
-// It advances the internal snapshot so subsequent calls only diff against the new state.
+// It advances the snapshot so subsequent calls only diff against the latest persisted state.
 func (s *statusWriter) setAndPersist(ctx context.Context, condType string, condStatus metav1.ConditionStatus, reason, message string) error {
 	apimeta.SetStatusCondition(&s.sare.Status.Conditions, metav1.Condition{
 		Type:               condType,
@@ -64,9 +63,12 @@ func (s *statusWriter) setAndPersist(ctx context.Context, condType string, condS
 		Message:            message,
 		ObservedGeneration: s.sare.Generation,
 	})
-	if err := s.client.Status().Patch(ctx, s.sare, client.MergeFrom(s.before)); err != nil {
+	if err := s.client.Status().Patch(ctx, s.sare, client.MergeFrom(s.patchBase)); err != nil {
 		return fmt.Errorf("failed to persist %s condition: %w", condType, err)
 	}
-	s.before = s.sare.DeepCopy()
+
+	// update the snapshot after successful patch
+	s.patchBase = s.sare.DeepCopy()
+
 	return nil
 }

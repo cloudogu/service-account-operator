@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	apiKeyHeader   = "X-CES-SA-API-KEY"
-	defaultTimeout = 30 * time.Second
+	apiKeyHeader         = "X-CES-SA-API-KEY"
+	defaultTimeout30secs = 30 * time.Second
 )
 
 // ServiceAccountClient manages service accounts on a specific producer.
@@ -23,7 +23,6 @@ type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Update re-provisions an existing service account and returns the refreshed credentials.
-	// Not yet implemented — requires a PUT endpoint on the producer side.
 	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
@@ -43,7 +42,7 @@ type HttpClient struct {
 // NewHTTPClient creates an HttpClient bound to a specific producer endpoint and API key.
 func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 	return &HttpClient{
-		client:   &http.Client{Timeout: defaultTimeout},
+		client:   &http.Client{Timeout: defaultTimeout30secs},
 		endpoint: endpoint,
 		apiKey:   apiKey,
 	}
@@ -87,7 +86,8 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	}
 }
 
-// Create calls POST {endpoint} to create a service account and returns the credentials.
+
+// Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
 	if err != nil {
@@ -103,13 +103,17 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request to producer %q failed: %w", c.endpoint, err)
+		return nil, fmt.Errorf("HTTP create-serviceaccount request to producer %q failed: %w", c.endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("producer %q rejected the request with 401 — check the API key in the auth secret", c.endpoint)
+	}
+
 	if resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("producer returned unexpected status %d for %q: %s", resp.StatusCode, c.endpoint, string(respBody))
+		return nil, fmt.Errorf("producer returned unexpected status %s for %q: %s", resp.Status, c.endpoint, string(respBody))
 	}
 
 	var credentials map[string]string
@@ -125,26 +129,33 @@ func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]s
 	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
 }
 
-// Ready probes the producer endpoint with a HEAD request. Any HTTP response — even 4xx/5xx —
-// counts as reachable; only transport errors (DNS failure, connection refused, missing netpols)
-// mean the endpoint is unreachable.
+// Ready checks the producer endpoint for basic readiness and returns an error if the endpoint is unreachable or returns a 5xx status.
+// Transport errors (DNS failure, connection refused, missing netpols) as well as HTTP 401 and 5xx responses are treated as not-ready.
 func (c *HttpClient) Ready(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.endpoint, nil)
 	if err != nil {
-		return fmt.Errorf("failed to build readiness probe request for %q: %w", c.endpoint, err)
+		return fmt.Errorf("failed to build request to check producer readiness for %q: %w", c.endpoint, err)
 	}
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("endpoint %q is not reachable: %w", c.endpoint, err)
+		return fmt.Errorf("endpoint %q is not ready because it is unreachable: %w", c.endpoint, err)
 	}
 	_ = resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("producer %q rejected the request with 401 — check the API key in the auth secret", c.endpoint)
+	}
+
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("endpoint %q is not ready (status %s)", c.endpoint, resp.Status)
+	}
 
 	return nil
 }
 
-// Delete calls DELETE {endpoint}/{consumer} to remove a service account.
+// Delete removes a consumer's service account from the service account producer.
 func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
@@ -159,14 +170,18 @@ func (c *HttpClient) Delete(ctx context.Context, consumer string) error {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP request to producer %q failed: %w", targetURL, err)
+		return fmt.Errorf("HTTP delete-serviceaccount request to producer %q failed: %w", targetURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("producer %q rejected the request with 401 — check the API key in the auth secret", c.endpoint)
+	}
+
 	// A missing service account is an acceptable outcome for a delete.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+	if (resp.StatusCode < 200 || resp.StatusCode >= 300) && resp.StatusCode != http.StatusNotFound {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("producer returned unexpected status %d for %q: %s", resp.StatusCode, targetURL, string(respBody))
+		return fmt.Errorf("producer returned unexpected status %s for %q: %s", resp.Status, targetURL, string(respBody))
 	}
 
 	return nil

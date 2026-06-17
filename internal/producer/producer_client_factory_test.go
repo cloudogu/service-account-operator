@@ -1,7 +1,6 @@
 package producer
 
 import (
-	"context"
 	"testing"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
@@ -49,7 +48,7 @@ func TestNewProducerClientFactory(t *testing.T) {
 		scheme := newTestScheme(t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		factory := NewProducerClientFactory(rtClient)
+		factory := NewClientFactory(rtClient)
 
 		assert.NotNil(t, factory)
 		assert.Equal(t, rtClient, factory.rtClient)
@@ -70,7 +69,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 			},
 		}
 
-		_, err := factory.NewForProducer(context.Background(), "ecosystem", sapr)
+		_, err := factory.NewForProducer(testCtx, "ecosystem", sapr)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no HTTP spec configured")
@@ -83,7 +82,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 
-		_, err := factory.NewForProducer(context.Background(), "ecosystem", sapr)
+		_, err := factory.NewForProducer(testCtx, "ecosystem", sapr)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get auth secret")
@@ -97,7 +96,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 
-		_, err := factory.NewForProducer(context.Background(), "ecosystem", sapr)
+		_, err := factory.NewForProducer(testCtx, "ecosystem", sapr)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not contain key")
@@ -111,7 +110,7 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 
 		sapr := newTestSAPR("prometheus", "ecosystem", "http://prometheus:9090/serviceaccounts")
 
-		httpClient, err := factory.NewForProducer(context.Background(), "ecosystem", sapr)
+		httpClient, err := factory.NewForProducer(testCtx, "ecosystem", sapr)
 
 		require.NoError(t, err)
 		assert.NotNil(t, httpClient)
