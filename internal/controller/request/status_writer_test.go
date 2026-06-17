@@ -1,7 +1,6 @@
 package request
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -34,27 +33,27 @@ func buildStatusWriterClientWithoutObject(t *testing.T) client.Client {
 	scheme := newTestScheme(t)
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
 		Build()
 }
 
-func getUpdatedSARE(t *testing.T, c client.Client, sare *serviceaccountv1.ServiceAccountRequest) serviceaccountv1.ServiceAccountRequest {
+func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccountv1.ServiceAccountRequest) serviceaccountv1.ServiceAccountRequest {
 	t.Helper()
 	var updated serviceaccountv1.ServiceAccountRequest
-	require.NoError(t, c.Get(context.Background(),
-		types.NamespacedName{Name: sare.Name, Namespace: sare.Namespace}, &updated))
+	require.NoError(t, c.Get(testCtx, types.NamespacedName{Name: sare.Name, Namespace: sare.Namespace}, &updated))
 	return updated
 }
 
 func TestStatusWriter_ProducerReady(t *testing.T) {
 	t.Run("should set ProducerReady=True and persist to cluster", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
-		rtClient := buildStatusWriterClient(t, sare)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusWriterClient(t, &sare)
 
-		err := newStatusWriter(rtClient, sare).producerReady(context.Background())
+		err := newStatusWriter(rtClient, &sare).producerReady(testCtx)
 
 		require.NoError(t, err)
-		updated := getUpdatedSARE(t, rtClient, sare)
+		updated := getFreshSareFromCluster(t, rtClient, &sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
@@ -62,10 +61,12 @@ func TestStatusWriter_ProducerReady(t *testing.T) {
 	})
 
 	t.Run("should return error containing condition type when persist fails", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusWriterClientWithoutObject(t)
 
-		err := newStatusWriter(rtClient, sare).producerReady(context.Background())
+		err := newStatusWriter(rtClient, &sare).producerReady(testCtx)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeProducerReady)
@@ -74,13 +75,16 @@ func TestStatusWriter_ProducerReady(t *testing.T) {
 
 func TestStatusWriter_ProducerNotFound(t *testing.T) {
 	t.Run("should set ProducerReady=False with producer name in message and persist to cluster", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", true)
-		rtClient := buildStatusWriterClient(t, sare)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Optional = true
+		rtClient := buildStatusWriterClient(t, &sare)
 
-		err := newStatusWriter(rtClient, sare).producerNotFound(context.Background(), "prometheus", fmt.Errorf("not found"))
+		err := newStatusWriter(rtClient, &sare).producerNotFound(testCtx, "prometheus", fmt.Errorf("not found"))
 
 		require.NoError(t, err)
-		updated := getUpdatedSARE(t, rtClient, sare)
+		updated := getFreshSareFromCluster(t, rtClient, &sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
@@ -91,13 +95,15 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 
 func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 	t.Run("should set ServiceAccountReady=True and persist to cluster", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
-		rtClient := buildStatusWriterClient(t, sare)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusWriterClient(t, &sare)
 
-		err := newStatusWriter(rtClient, sare).serviceAccountReady(context.Background())
+		err := newStatusWriter(rtClient, &sare).serviceAccountReady(testCtx)
 
 		require.NoError(t, err)
-		updated := getUpdatedSARE(t, rtClient, sare)
+		updated := getFreshSareFromCluster(t, rtClient, &sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
@@ -107,14 +113,16 @@ func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 
 func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with error message and persist to cluster", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
-		rtClient := buildStatusWriterClient(t, sare)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusWriterClient(t, &sare)
 
 		reconcileErr := errors.New("connection refused")
-		err := newStatusWriter(rtClient, sare).serviceAccountFailed(context.Background(), reconcileErr)
+		err := newStatusWriter(rtClient, &sare).serviceAccountFailed(testCtx, reconcileErr)
 
 		require.NoError(t, err)
-		updated := getUpdatedSARE(t, rtClient, sare)
+		updated := getFreshSareFromCluster(t, rtClient, &sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
@@ -123,10 +131,12 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 	})
 
 	t.Run("should return error containing condition type when persist fails", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusWriterClientWithoutObject(t)
 
-		err := newStatusWriter(rtClient, sare).serviceAccountFailed(context.Background(), errors.New("boom"))
+		err := newStatusWriter(rtClient, &sare).serviceAccountFailed(testCtx, errors.New("boom"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeServiceAccountReady)
@@ -135,14 +145,16 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 
 func TestStatusWriter_SequentialConditions(t *testing.T) {
 	t.Run("should persist both conditions when called in sequence on the same writer", func(t *testing.T) {
-		sare := newTestSAREWithFinalizer("test-sare", "ecosystem", "prometheus", false)
-		rtClient := buildStatusWriterClient(t, sare)
-		sw := newStatusWriter(rtClient, sare)
+		sare := testSare
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusWriterClient(t, &sare)
+		sw := newStatusWriter(rtClient, &sare)
 
-		require.NoError(t, sw.producerReady(context.Background()))
-		require.NoError(t, sw.serviceAccountReady(context.Background()))
+		require.NoError(t, sw.producerReady(testCtx))
+		require.NoError(t, sw.serviceAccountReady(testCtx))
 
-		updated := getUpdatedSARE(t, rtClient, sare)
+		updated := getFreshSareFromCluster(t, rtClient, &sare)
 
 		producerCond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
 		require.NotNil(t, producerCond)

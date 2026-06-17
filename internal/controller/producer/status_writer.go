@@ -14,48 +14,32 @@ import (
 // The lib only defines the failure reasons (ConditionReadyReason*), so the success reason lives here.
 const reasonProducerReady = "ProducerReady"
 
-// statusWriter buffers Ready-condition changes on a ServiceAccountProducer and patches the status
-// subresource. It snapshots the producer at construction time so each patch only contains the diff.
-type statusWriter struct {
-	client client.Client
-	sapr   *serviceaccountv1.ServiceAccountProducer
-	before *serviceaccountv1.ServiceAccountProducer
+// markReady sets Ready=True on sapr and persists the condition.
+func markReady(ctx context.Context, c client.Client, sapr *serviceaccountv1.ServiceAccountProducer) error {
+	return setAndPersist(ctx, c, sapr, metav1.ConditionTrue, reasonProducerReady, "")
 }
 
-// newStatusWriter snapshots the producer and returns a writer for its Ready condition.
-func newStatusWriter(c client.Client, sapr *serviceaccountv1.ServiceAccountProducer) *statusWriter {
-	return &statusWriter{
-		client: c,
-		sapr:   sapr,
-		before: sapr.DeepCopy(),
-	}
+// markNotReady sets Ready=False with the given reason and message and persists the condition.
+func markNotReady(ctx context.Context, c client.Client, sapr *serviceaccountv1.ServiceAccountProducer, reason, message string) error {
+	return setAndPersist(ctx, c, sapr, metav1.ConditionFalse, reason, message)
 }
 
-// ready sets Ready=True and persists the condition.
-func (s *statusWriter) ready(ctx context.Context) error {
-	return s.setAndPersist(ctx, metav1.ConditionTrue, reasonProducerReady, "")
-}
+func setAndPersist(ctx context.Context, c client.Client, sapr *serviceaccountv1.ServiceAccountProducer, condStatus metav1.ConditionStatus, reason, message string) error {
+	// patchBase is needed as a "merge-base" to create the PATCH request with all changed fields
+	patchBase := sapr.DeepCopy()
 
-// notReady sets Ready=False with the given reason and message and persists the condition.
-func (s *statusWriter) notReady(ctx context.Context, reason, message string) error {
-	return s.setAndPersist(ctx, metav1.ConditionFalse, reason, message)
-}
-
-// setAndPersist sets the Ready condition, stamps LastExecution and patches the status subresource.
-func (s *statusWriter) setAndPersist(ctx context.Context, condStatus metav1.ConditionStatus, reason, message string) error {
-	apimeta.SetStatusCondition(&s.sapr.Status.Conditions, metav1.Condition{
+	apimeta.SetStatusCondition(&sapr.Status.Conditions, metav1.Condition{
 		Type:               serviceaccountv1.ConditionTypeReady,
 		Status:             condStatus,
 		Reason:             reason,
 		Message:            message,
-		ObservedGeneration: s.sapr.Generation,
+		ObservedGeneration: sapr.Generation,
 	})
-	s.sapr.Status.LastExecution = metav1.Now()
+	sapr.Status.LastExecution = metav1.Now()
 
-	if err := s.client.Status().Patch(ctx, s.sapr, client.MergeFrom(s.before)); err != nil {
+	if err := c.Status().Patch(ctx, sapr, client.MergeFrom(patchBase)); err != nil {
 		return fmt.Errorf("failed to persist Ready condition: %w", err)
 	}
-	s.before = s.sapr.DeepCopy()
 
 	return nil
 }

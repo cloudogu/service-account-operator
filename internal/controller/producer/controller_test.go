@@ -19,18 +19,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+var testCtx = context.Background()
+
 func TestController_Reconcile(t *testing.T) {
 	t.Run("should set Ready=True and requeue when the producer is reachable", func(t *testing.T) {
-		rtClient := newClientWith(t, newTestSAPR("example-producer", "default"))
+		sapr := newTestSAPR("example-producer", "default")
+		rtClient := newClientWith(t, sapr)
 		factory := newMockProducerClientFactory(t)
 		saClient := newMockServiceAccountClient(t)
-		saClient.EXPECT().Ready(mock.Anything).Return(nil)
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+		saClient.EXPECT().Ready(testCtx).Return(nil)
+		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
 		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
 
@@ -41,16 +44,17 @@ func TestController_Reconcile(t *testing.T) {
 	})
 
 	t.Run("should set Ready=False with ConnectionFailed when the endpoint is unreachable", func(t *testing.T) {
-		rtClient := newClientWith(t, newTestSAPR("example-producer", "default"))
+		sapr := newTestSAPR("example-producer", "default")
+		rtClient := newClientWith(t, sapr)
 		factory := newMockProducerClientFactory(t)
 		saClient := newMockServiceAccountClient(t)
-		saClient.EXPECT().Ready(mock.Anything).Return(errors.New("connection refused"))
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+		saClient.EXPECT().Ready(testCtx).Return(errors.New("connection refused"))
+		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
 		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
 
@@ -61,15 +65,16 @@ func TestController_Reconcile(t *testing.T) {
 	})
 
 	t.Run("should set Ready=False with AuthSecretNotFound when the client cannot be built", func(t *testing.T) {
-		rtClient := newClientWith(t, newTestSAPR("example-producer", "default"))
+		sapr := newTestSAPR("example-producer", "default")
+		rtClient := newClientWith(t, sapr)
 		factory := newMockProducerClientFactory(t)
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).
+		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).
 			Return(nil, errors.New("failed to get auth secret"))
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
 		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
 
@@ -87,7 +92,7 @@ func TestController_Reconcile(t *testing.T) {
 		controller := New(rtClient)
 		controller.clientFactory = newMockProducerClientFactory(t)
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
 		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
 
@@ -99,9 +104,10 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when status.notReady write fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
+		sapr := newTestSAPR("example-producer", "default")
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(newTestSAPR("example-producer", "default")).
+			WithObjects(sapr).
 			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
@@ -111,13 +117,13 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 		factory := newMockProducerClientFactory(t)
 		saClient := newMockServiceAccountClient(t)
-		saClient.EXPECT().Ready(mock.Anything).Return(errors.New("connection refused"))
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+		saClient.EXPECT().Ready(testCtx).Return(errors.New("connection refused"))
+		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
 
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		_, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "status patch failed")
@@ -125,9 +131,10 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when status.ready write fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
+		sapr := newTestSAPR("example-producer", "default")
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(newTestSAPR("example-producer", "default")).
+			WithObjects(sapr).
 			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
@@ -137,13 +144,13 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 		factory := newMockProducerClientFactory(t)
 		saClient := newMockServiceAccountClient(t)
-		saClient.EXPECT().Ready(mock.Anything).Return(nil)
-		factory.EXPECT().NewForProducer(mock.Anything, "default", mock.Anything).Return(saClient, nil)
+		saClient.EXPECT().Ready(testCtx).Return(nil)
+		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
 		controller := New(rtClient)
 		controller.clientFactory = factory
 
-		_, err := controller.Reconcile(context.Background(), reconcileRequest("example-producer", "default"))
+		_, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "status patch failed")
@@ -154,9 +161,15 @@ func TestController_Reconcile(t *testing.T) {
 		controller := New(rtClient)
 		controller.clientFactory = newMockProducerClientFactory(t)
 
-		result, err := controller.Reconcile(context.Background(), reconcileRequest("missing-producer", "default"))
+		result, err := controller.Reconcile(testCtx, reconcileRequest("missing-producer", "default"))
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
+	})
+}
+
+func matchSAPR(sapr *serviceaccountv1.ServiceAccountProducer) any {
+	return mock.MatchedBy(func(p *serviceaccountv1.ServiceAccountProducer) bool {
+		return p != nil && p.Name == sapr.Name
 	})
 }
 
@@ -176,7 +189,7 @@ func newClientWith(t *testing.T, objs ...client.Object) client.Client {
 func readyCondition(t *testing.T, rtClient client.Client, name, namespace string) *metav1.Condition {
 	t.Helper()
 	var updated serviceaccountv1.ServiceAccountProducer
-	require.NoError(t, rtClient.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, &updated))
+	require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Namespace: namespace, Name: name}, &updated))
 	return apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeReady)
 }
 

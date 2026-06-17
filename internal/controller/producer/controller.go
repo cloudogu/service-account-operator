@@ -21,22 +21,22 @@ type serviceAccountClient interface { //nolint:unused
 	producerclient.ServiceAccountClient
 }
 
-// producerClientFactory builds a client for a given ServiceAccountProducer, resolving the API key
+// clientFactory builds a client for a given ServiceAccountProducer, resolving the API key
 // from the referenced Kubernetes Secret.
-type producerClientFactory interface {
+type clientFactory interface {
 	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (producerclient.ServiceAccountClient, error)
 }
 
 // Controller reconciles ServiceAccountProducer resources.
 type Controller struct {
 	client        client.Client
-	clientFactory producerClientFactory
+	clientFactory clientFactory
 }
 
 func New(rtClient client.Client) *Controller {
 	return &Controller{
 		client:        rtClient,
-		clientFactory: producerclient.NewProducerClientFactory(rtClient),
+		clientFactory: producerclient.NewClientFactory(rtClient),
 	}
 }
 
@@ -50,18 +50,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	status := newStatusWriter(c.client, &sapr)
-
 	if reason, checkErr := c.checkReady(ctx, &sapr); checkErr != nil {
 		logger.Info("producer not ready", "reason", reason, "error", checkErr.Error())
-		if err := status.notReady(ctx, reason, checkErr.Error()); err != nil {
+		if err := markNotReady(ctx, c.client, &sapr, reason, checkErr.Error()); err != nil {
 			return ctrl.Result{}, err
 		}
 
 		return ctrl.Result{RequeueAfter: readinessCheckInterval}, nil
 	}
 
-	if err := status.ready(ctx); err != nil {
+	if err := markReady(ctx, c.client, &sapr); err != nil {
 		return ctrl.Result{}, err
 	}
 
