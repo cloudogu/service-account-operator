@@ -142,10 +142,6 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 	}
 
 	sare.Status.SecretRef = &serviceaccountv1.LocalSecretRef{Name: secretName}
-	if err := status.producerReady(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
-	}
-
 	if err := status.serviceAccountReady(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}

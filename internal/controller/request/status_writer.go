@@ -28,16 +28,10 @@ func newStatusWriter(c client.Client, sare *serviceaccountv1.ServiceAccountReque
 	}
 }
 
-// producerReady sets ProducerReady=True and persists the condition.
-func (s *statusWriter) producerReady(ctx context.Context) error {
-	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionTrue,
-		serviceaccountv1.ConditionReasonProducerReadyProducerFound, "")
-}
-
-// producerNotFound sets ProducerReady=False with the producer name and underlying error in the message.
+// producerNotFound sets ServiceAccountReady=False with the producer name and underlying error in the message.
 func (s *statusWriter) producerNotFound(ctx context.Context, producer string, err error) error {
-	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeProducerReady, metav1.ConditionFalse,
-		serviceaccountv1.ConditionReasonProducerReadyProducerNotFound,
+	return s.setAndPersist(ctx, serviceaccountv1.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
+		serviceaccountv1.ConditionReasonServiceAccountReadyProducerNotFound,
 		fmt.Sprintf("producer %q not found: %s", producer, err.Error()))
 }
 

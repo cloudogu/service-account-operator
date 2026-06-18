@@ -43,38 +43,8 @@ func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccount
 	return updated
 }
 
-func TestStatusWriter_ProducerReady(t *testing.T) {
-	t.Run("should set ProducerReady=True and persist to cluster", func(t *testing.T) {
-		sare := testSare
-		sare.Name = "test-sare"
-		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClient(t, &sare)
-
-		err := newStatusWriter(rtClient, &sare).producerReady(testCtx)
-
-		require.NoError(t, err)
-		updated := getFreshSareFromCluster(t, rtClient, &sare)
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
-		require.NotNil(t, cond)
-		assert.Equal(t, metav1.ConditionTrue, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerFound, cond.Reason)
-	})
-
-	t.Run("should return error containing condition type when persist fails", func(t *testing.T) {
-		sare := testSare
-		sare.Name = "test-sare"
-		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClientWithoutObject(t)
-
-		err := newStatusWriter(rtClient, &sare).producerReady(testCtx)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeProducerReady)
-	})
-}
-
 func TestStatusWriter_ProducerNotFound(t *testing.T) {
-	t.Run("should set ProducerReady=False with producer name in message and persist to cluster", func(t *testing.T) {
+	t.Run("should set ServiceAccountReady=False with ProducerNotFound reason and persist to cluster", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
@@ -85,10 +55,10 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerNotFound, cond.Reason)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
 		assert.Contains(t, cond.Message, "prometheus")
 	})
 }
@@ -151,17 +121,13 @@ func TestStatusWriter_SequentialConditions(t *testing.T) {
 		rtClient := buildStatusWriterClient(t, &sare)
 		sw := newStatusWriter(rtClient, &sare)
 
-		require.NoError(t, sw.producerReady(testCtx))
+		require.NoError(t, sw.producerNotFound(testCtx, "prometheus", fmt.Errorf("not found")))
 		require.NoError(t, sw.serviceAccountReady(testCtx))
 
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
 
-		producerCond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
-		require.NotNil(t, producerCond)
-		assert.Equal(t, metav1.ConditionTrue, producerCond.Status)
-
-		saCond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
-		require.NotNil(t, saCond)
-		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 	})
 }

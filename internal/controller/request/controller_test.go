@@ -214,7 +214,7 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Contains(t, cond.Message, "not owned by this service account request")
 	})
 
-	t.Run("should return empty result and set ProducerReady=False for optional SARE when producer is not found", func(t *testing.T) {
+	t.Run("should return empty result and set ServiceAccountReady=False with ProducerNotFound reason for optional SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
@@ -233,10 +233,10 @@ func TestController_Reconcile(t *testing.T) {
 
 		var updated serviceaccountv1.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerNotFound, cond.Reason)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
 	})
 
 	t.Run("should return error for required SARE when producer is not found", func(t *testing.T) {
@@ -412,7 +412,7 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Contains(t, err.Error(), "auth secret not found")
 	})
 
-	t.Run("should return error when producerReady status update fails after successful create", func(t *testing.T) {
+	t.Run("should return error when serviceAccountReady status update fails after successful create", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
@@ -424,44 +424,6 @@ func TestController_Reconcile(t *testing.T) {
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					return errors.New("status patch failed")
-				},
-			}).
-			Build()
-		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
-			Return(map[string]string{"key": "val"}, nil)
-		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
-		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
-		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).Return("grafana-to-prometheus", nil)
-		controller := New(rtClient, scheme)
-		controller.producerClientFactory = factoryMock
-		controller.secretManager = secretMgrMock
-
-		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to update status after successful create")
-	})
-
-	t.Run("should return error when serviceAccountReady status update fails after successful create", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := testSare
-		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
-		patchCount := 0
-		rtClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
-			WithInterceptorFuncs(interceptor.Funcs{
-				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-					patchCount++
-					if patchCount == 1 {
-						return c.Status().Patch(ctx, obj, patch, opts...)
-					}
-					return errors.New("status patch failed on second call")
 				},
 			}).
 			Build()
@@ -589,11 +551,6 @@ func TestController_Reconcile(t *testing.T) {
 		require.NotNil(t, saCond)
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
 		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
-
-		producerCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeProducerReady)
-		require.NotNil(t, producerCond)
-		assert.Equal(t, metav1.ConditionTrue, producerCond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonProducerReadyProducerFound, producerCond.Reason)
 	})
 }
 
