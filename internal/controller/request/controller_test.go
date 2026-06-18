@@ -3,11 +3,13 @@ package request
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
+	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -183,6 +185,33 @@ func TestController_Reconcile(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to check if service account secret exists for")
 		assert.Contains(t, err.Error(), "grafana-to-prometheus")
+	})
+
+	t.Run("should return ErrSecretConflict and set ServiceAccountReady=False when secret exists but is not owned by this SARE", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := testSare
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&sare).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
+		secretMgrMock := newMockSecretManager(t)
+		conflictErr := fmt.Errorf("%w: secret %q in namespace %q", sa.ErrSecretConflict, "grafana-to-prometheus", "ecosystem")
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, conflictErr)
+		controller := New(rtClient, scheme)
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.ErrorIs(t, err, sa.ErrSecretConflict)
+		var updated serviceaccountv1.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyFailed, cond.Reason)
+		assert.Contains(t, cond.Message, "not owned by this service account request")
 	})
 
 	t.Run("should return empty result and set ProducerReady=False for optional SARE when producer is not found", func(t *testing.T) {

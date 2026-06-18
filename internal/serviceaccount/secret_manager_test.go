@@ -65,7 +65,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		assert.True(t, exists)
 	})
 
-	t.Run("should return false when target secret exists but is not owned by this SARE", func(t *testing.T) {
+	t.Run("should return ErrSecretConflict when target secret exists but is not owned by this SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
 		existing := &corev1.Secret{
@@ -76,7 +76,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(testCtx, sare)
 
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrSecretConflict)
 		assert.False(t, exists)
 	})
 
@@ -172,7 +172,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
 	})
 
-	t.Run("should set owner reference on pre-existing secret without ownerRef", func(t *testing.T) {
+	t.Run("should return ErrSecretConflict when secret exists without owner ref", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
 		sare.UID = "test-uid-123"
@@ -183,21 +183,15 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"key": "val"})
-		require.NoError(t, err)
 
-		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
-		require.Len(t, secret.OwnerReferences, 1)
-		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
+		require.ErrorIs(t, err, ErrSecretConflict)
 	})
 
-	t.Run("should update existing secret credentials", func(t *testing.T) {
+	t.Run("should update existing secret credentials when secret is owned by this SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		existing := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-			StringData: map[string]string{"username": "old-user", "password": "old-pass"},
-		}
+		existing := newOwnedSecret("grafana-to-prometheus", "ecosystem", sare, scheme, t)
+		existing.StringData = map[string]string{"username": "old-user", "password": "old-pass"}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)

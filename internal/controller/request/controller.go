@@ -2,6 +2,7 @@ package request
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
@@ -78,8 +79,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
 	}
 
+	status := newStatusWriter(c.client, &sare)
+
 	exists, err := c.secretManager.Exists(ctx, &sare)
 	if err != nil {
+		if errors.Is(err, sa.ErrSecretConflict) {
+			return ctrl.Result{}, c.fail(ctx, status, err)
+		}
+
 		logger.Error(err, "failed to check if service account secret exists")
 
 		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
@@ -88,12 +95,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if exists {
 		logger.Info("service account request needs to be updated")
 
-		return c.reconcileUpdate(ctx, &sare)
+		return c.reconcileUpdate(ctx, &sare, status)
 	}
 
 	logger.Info("service account request needs to be created")
 
-	return c.reconcileCreate(ctx, &sare)
+	return c.reconcileCreate(ctx, &sare, status)
 }
 
 // TODO(open question): When an optional service account is created only after the consumer has
@@ -102,9 +109,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
 // reload credentials on its own. Pending product decision before implementing.
 
-func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, status *statusWriter) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-	status := newStatusWriter(c.client, sare)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
@@ -179,7 +185,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	return nil
 }
 
-func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, _ *statusWriter) (ctrl.Result, error) {
 	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
 	return ctrl.Result{}, nil
 }
