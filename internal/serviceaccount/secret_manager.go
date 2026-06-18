@@ -35,6 +35,7 @@ func resolveSecretName(sare *serviceaccountv1.ServiceAccountRequest) string {
 	if sare.Spec.SecretRef != nil && sare.Spec.SecretRef.Name != "" {
 		return sare.Spec.SecretRef.Name
 	}
+
 	return sare.Name
 }
 
@@ -49,14 +50,14 @@ func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv1.Serv
 			return true, nil
 		}
 
-		return false, fmt.Errorf("failed to check for existing secret %q: %w", name, ErrSecretConflict)
+		return false, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, ErrSecretConflict)
 	}
 
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("failed to check for existing secret %q: %w", name, err)
+	return false, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, err)
 }
 
 // CreateOrUpdate creates or updates the Kubernetes Secret for the given SARE with the provided credentials.
