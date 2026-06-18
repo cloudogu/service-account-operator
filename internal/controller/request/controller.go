@@ -131,7 +131,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), producer.NewParamsFromSpec(sare.Spec.Params))
+	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), sare.Spec.Params)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}

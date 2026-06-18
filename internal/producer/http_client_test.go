@@ -26,7 +26,7 @@ func TestHTTPClient_Create(t *testing.T) {
 			var req createRequestBody
 			require.NoError(t, json.Unmarshal(body, &req))
 			assert.Equal(t, "grafana", req.Consumer)
-			assert.Equal(t, Params{"--verbose"}, req.Params)
+			assert.Equal(t, Params{"verbose": "true"}, req.Params)
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -35,7 +35,7 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.Create(testCtx, "grafana", Params{"--verbose"})
+		creds, err := client.Create(testCtx, "grafana", Params{"verbose": "true"})
 
 		require.NoError(t, err)
 		assert.Equal(t, "grafana-user", creds["username"])

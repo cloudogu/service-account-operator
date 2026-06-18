@@ -521,6 +521,36 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to remove finalizer")
 	})
 
+	t.Run("should forward spec.params to the producer Create call", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := testSare
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Params = map[string]string{"readOnly": "true", "scrapeInterval": "30s"}
+		sapr := testSapr
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&sare, &sapr).
+			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			Build()
+
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().
+			Create(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}).
+			Return(map[string]string{"apiKey": "abc"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"apiKey": "abc"}).Return("grafana-to-prometheus", nil)
+		controller := New(rtClient, scheme)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.NoError(t, err)
+	})
+
 	t.Run("should create secret and update status with Ready conditions on success", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
