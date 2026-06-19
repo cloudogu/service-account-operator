@@ -25,4 +25,4 @@ appVersion: "0.0.0-replaceme"
 
 annotations:
   # TODO Add < 2.0.0?
-  "k8s.cloudogu.com/ces-dependency/k8s-serviceaccount-crd": ">=1.0.0-0"
+  "k8s.cloudogu.com/ces-dependency/k8s-serviceaccount-crd": ">=2.0.1-0, <3.0.0"
