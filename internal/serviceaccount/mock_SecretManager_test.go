@@ -5,7 +5,7 @@ package serviceaccount
 import (
 	context "context"
 
-	v1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	v1 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	mock "github.com/stretchr/testify/mock"
 )
 

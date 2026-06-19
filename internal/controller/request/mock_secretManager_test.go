@@ -5,7 +5,7 @@ package request
 import (
 	context "context"
 
-	v1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	v2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -23,7 +23,7 @@ func (_m *mockSecretManager) EXPECT() *mockSecretManager_Expecter {
 }
 
 // CreateOrUpdate provides a mock function with given fields: ctx, sare, credentials
-func (_m *mockSecretManager) CreateOrUpdate(ctx context.Context, sare *v1.ServiceAccountRequest, credentials map[string]string) (string, error) {
+func (_m *mockSecretManager) CreateOrUpdate(ctx context.Context, sare *v2.ServiceAccountRequest, credentials map[string]string) (string, error) {
 	ret := _m.Called(ctx, sare, credentials)
 
 	if len(ret) == 0 {
@@ -32,16 +32,16 @@ func (_m *mockSecretManager) CreateOrUpdate(ctx context.Context, sare *v1.Servic
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest, map[string]string) (string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest, map[string]string) (string, error)); ok {
 		return rf(ctx, sare, credentials)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest, map[string]string) string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest, map[string]string) string); ok {
 		r0 = rf(ctx, sare, credentials)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *v1.ServiceAccountRequest, map[string]string) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest, map[string]string) error); ok {
 		r1 = rf(ctx, sare, credentials)
 	} else {
 		r1 = ret.Error(1)
@@ -57,15 +57,15 @@ type mockSecretManager_CreateOrUpdate_Call struct {
 
 // CreateOrUpdate is a helper method to define mock.On call
 //   - ctx context.Context
-//   - sare *v1.ServiceAccountRequest
+//   - sare *v2.ServiceAccountRequest
 //   - credentials map[string]string
 func (_e *mockSecretManager_Expecter) CreateOrUpdate(ctx interface{}, sare interface{}, credentials interface{}) *mockSecretManager_CreateOrUpdate_Call {
 	return &mockSecretManager_CreateOrUpdate_Call{Call: _e.mock.On("CreateOrUpdate", ctx, sare, credentials)}
 }
 
-func (_c *mockSecretManager_CreateOrUpdate_Call) Run(run func(ctx context.Context, sare *v1.ServiceAccountRequest, credentials map[string]string)) *mockSecretManager_CreateOrUpdate_Call {
+func (_c *mockSecretManager_CreateOrUpdate_Call) Run(run func(ctx context.Context, sare *v2.ServiceAccountRequest, credentials map[string]string)) *mockSecretManager_CreateOrUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*v1.ServiceAccountRequest), args[2].(map[string]string))
+		run(args[0].(context.Context), args[1].(*v2.ServiceAccountRequest), args[2].(map[string]string))
 	})
 	return _c
 }
@@ -75,13 +75,13 @@ func (_c *mockSecretManager_CreateOrUpdate_Call) Return(_a0 string, _a1 error) *
 	return _c
 }
 
-func (_c *mockSecretManager_CreateOrUpdate_Call) RunAndReturn(run func(context.Context, *v1.ServiceAccountRequest, map[string]string) (string, error)) *mockSecretManager_CreateOrUpdate_Call {
+func (_c *mockSecretManager_CreateOrUpdate_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest, map[string]string) (string, error)) *mockSecretManager_CreateOrUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Exists provides a mock function with given fields: ctx, sare
-func (_m *mockSecretManager) Exists(ctx context.Context, sare *v1.ServiceAccountRequest) (bool, error) {
+func (_m *mockSecretManager) Exists(ctx context.Context, sare *v2.ServiceAccountRequest) (bool, error) {
 	ret := _m.Called(ctx, sare)
 
 	if len(ret) == 0 {
@@ -90,16 +90,16 @@ func (_m *mockSecretManager) Exists(ctx context.Context, sare *v1.ServiceAccount
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest) (bool, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) (bool, error)); ok {
 		return rf(ctx, sare)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *v1.ServiceAccountRequest) bool); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) bool); ok {
 		r0 = rf(ctx, sare)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *v1.ServiceAccountRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest) error); ok {
 		r1 = rf(ctx, sare)
 	} else {
 		r1 = ret.Error(1)
@@ -115,14 +115,14 @@ type mockSecretManager_Exists_Call struct {
 
 // Exists is a helper method to define mock.On call
 //   - ctx context.Context
-//   - sare *v1.ServiceAccountRequest
+//   - sare *v2.ServiceAccountRequest
 func (_e *mockSecretManager_Expecter) Exists(ctx interface{}, sare interface{}) *mockSecretManager_Exists_Call {
 	return &mockSecretManager_Exists_Call{Call: _e.mock.On("Exists", ctx, sare)}
 }
 
-func (_c *mockSecretManager_Exists_Call) Run(run func(ctx context.Context, sare *v1.ServiceAccountRequest)) *mockSecretManager_Exists_Call {
+func (_c *mockSecretManager_Exists_Call) Run(run func(ctx context.Context, sare *v2.ServiceAccountRequest)) *mockSecretManager_Exists_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*v1.ServiceAccountRequest))
+		run(args[0].(context.Context), args[1].(*v2.ServiceAccountRequest))
 	})
 	return _c
 }
@@ -132,7 +132,7 @@ func (_c *mockSecretManager_Exists_Call) Return(_a0 bool, _a1 error) *mockSecret
 	return _c
 }
 
-func (_c *mockSecretManager_Exists_Call) RunAndReturn(run func(context.Context, *v1.ServiceAccountRequest) (bool, error)) *mockSecretManager_Exists_Call {
+func (_c *mockSecretManager_Exists_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest) (bool, error)) *mockSecretManager_Exists_Call {
 	_c.Call.Return(run)
 	return _c
 }

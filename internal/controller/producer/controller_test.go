@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -61,7 +61,7 @@ func TestController_Reconcile(t *testing.T) {
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReadyReasonConnectionFailed, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReadyReasonConnectionFailed, cond.Reason)
 	})
 
 	t.Run("should set Ready=False with AuthSecretNotFound when the client cannot be built", func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestController_Reconcile(t *testing.T) {
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReadyReasonAuthSecretNotFound, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReadyReasonAuthSecretNotFound, cond.Reason)
 	})
 
 	t.Run("should set Ready=False with InvalidConfiguration when no HTTP spec is configured", func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestController_Reconcile(t *testing.T) {
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReadyReasonInvalidConfiguration, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReadyReasonInvalidConfiguration, cond.Reason)
 	})
 
 	t.Run("should return error when status.notReady write fails", func(t *testing.T) {
@@ -108,7 +108,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountProducer{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					return errors.New("status patch failed")
@@ -135,7 +135,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountProducer{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					return errors.New("status patch failed")
@@ -167,8 +167,8 @@ func TestController_Reconcile(t *testing.T) {
 	})
 }
 
-func matchSAPR(sapr *serviceaccountv1.ServiceAccountProducer) any {
-	return mock.MatchedBy(func(p *serviceaccountv1.ServiceAccountProducer) bool {
+func matchSAPR(sapr *serviceaccountv2.ServiceAccountProducer) any {
+	return mock.MatchedBy(func(p *serviceaccountv2.ServiceAccountProducer) bool {
 		return p != nil && p.Name == sapr.Name
 	})
 }
@@ -182,26 +182,26 @@ func newClientWith(t *testing.T, objs ...client.Object) client.Client {
 	return fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
 		WithObjects(objs...).
-		WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+		WithStatusSubresource(&serviceaccountv2.ServiceAccountProducer{}).
 		Build()
 }
 
 func readyCondition(t *testing.T, rtClient client.Client, name, namespace string) *metav1.Condition {
 	t.Helper()
-	var updated serviceaccountv1.ServiceAccountProducer
+	var updated serviceaccountv2.ServiceAccountProducer
 	require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Namespace: namespace, Name: name}, &updated))
-	return apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeReady)
+	return apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeReady)
 }
 
-func newTestSAPR(name, namespace string) *serviceaccountv1.ServiceAccountProducer {
-	return &serviceaccountv1.ServiceAccountProducer{
+func newTestSAPR(name, namespace string) *serviceaccountv2.ServiceAccountProducer {
+	return &serviceaccountv2.ServiceAccountProducer{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: serviceaccountv1.ServiceAccountProducerSpec{
+		Spec: serviceaccountv2.ServiceAccountProducerSpec{
 			Producer: name,
-			HTTP: &serviceaccountv1.HTTPProducer{
+			HTTP: &serviceaccountv2.HTTPProducer{
 				Endpoint: "https://nexus:8081/serviceaccounts",
-				AuthSecret: serviceaccountv1.ServiceAccountProducerAuthSecret{
-					LocalSecretRef: serviceaccountv1.LocalSecretRef{Name: name + "-auth"},
+				AuthSecret: serviceaccountv2.ServiceAccountProducerAuthSecret{
+					LocalSecretRef: serviceaccountv2.LocalSecretRef{Name: name + "-auth"},
 					Key:            "token",
 				},
 			},
@@ -213,8 +213,8 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
-	metav1.AddToGroupVersion(scheme, serviceaccountv1.GroupVersion)
-	require.NoError(t, serviceaccountv1.AddToScheme(scheme), "AddToScheme() failed")
+	metav1.AddToGroupVersion(scheme, serviceaccountv2.GroupVersion)
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme), "AddToScheme() failed")
 
 	return scheme
 }

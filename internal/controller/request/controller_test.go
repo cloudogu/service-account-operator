@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	"github.com/stretchr/testify/assert"
@@ -27,23 +27,23 @@ import (
 
 var testCtx = context.Background()
 
-var testSare = serviceaccountv1.ServiceAccountRequest{
+var testSare = serviceaccountv2.ServiceAccountRequest{
 	ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-	Spec: serviceaccountv1.ServiceAccountRequestSpec{
+	Spec: serviceaccountv2.ServiceAccountRequestSpec{
 		Consumer:     "grafana",
-		ConsumerType: serviceaccountv1.DoguConsumerType,
+		ConsumerType: serviceaccountv2.DoguConsumerType,
 		Producer:     "prometheus",
 	},
 }
 
-var testSapr = serviceaccountv1.ServiceAccountProducer{
+var testSapr = serviceaccountv2.ServiceAccountProducer{
 	ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
-	Spec: serviceaccountv1.ServiceAccountProducerSpec{
+	Spec: serviceaccountv2.ServiceAccountProducerSpec{
 		Producer: "prometheus",
-		HTTP: &serviceaccountv1.HTTPProducer{
+		HTTP: &serviceaccountv2.HTTPProducer{
 			Endpoint: "http://prometheus:9090/serviceaccounts",
-			AuthSecret: serviceaccountv1.ServiceAccountProducerAuthSecret{
-				LocalSecretRef: serviceaccountv1.LocalSecretRef{Name: "prometheus-sa-secret"},
+			AuthSecret: serviceaccountv2.ServiceAccountProducerAuthSecret{
+				LocalSecretRef: serviceaccountv2.LocalSecretRef{Name: "prometheus-sa-secret"},
 				Key:            "apiKey",
 			},
 		},
@@ -53,7 +53,7 @@ var testSapr = serviceaccountv1.ServiceAccountProducer{
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
 	return scheme
 }
@@ -62,7 +62,7 @@ func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
 }
 
-func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
+func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
 	t.Helper()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -77,14 +77,14 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 	return apimeta.FindStatusCondition(conditions, condType)
 }
 
-func matchSARE(sare serviceaccountv1.ServiceAccountRequest) any {
-	return mock.MatchedBy(func(s *serviceaccountv1.ServiceAccountRequest) bool {
+func matchSARE(sare serviceaccountv2.ServiceAccountRequest) any {
+	return mock.MatchedBy(func(s *serviceaccountv2.ServiceAccountRequest) bool {
 		return s != nil && s.Name == sare.Name
 	})
 }
 
-func matchSAPR(sapr serviceaccountv1.ServiceAccountProducer) any {
-	return mock.MatchedBy(func(p *serviceaccountv1.ServiceAccountProducer) bool {
+func matchSAPR(sapr serviceaccountv2.ServiceAccountProducer) any {
+	return mock.MatchedBy(func(p *serviceaccountv2.ServiceAccountProducer) bool {
 		return p != nil && p.Name == sapr.Name
 	})
 }
@@ -112,7 +112,7 @@ func TestController_Reconcile(t *testing.T) {
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 		require.Error(t, err)
 
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
 		assert.Equal(t, []string{finalizer}, updated.Finalizers)
 	})
@@ -132,7 +132,7 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, ctrl.Result{}, result)
 
 		// The fake client removes the object once the last finalizer is gone and deletionTimestamp is set.
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		err = rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated)
 		if err == nil {
 			assert.Empty(t, updated.Finalizers)
@@ -159,7 +159,7 @@ func TestController_Reconcile(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
-		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-secret"}
+		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-secret"}
 		existingSecret := newOwnedSecret("custom-secret", "ecosystem", &sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare, existingSecret).Build()
 		controller := New(rtClient, scheme)
@@ -194,7 +194,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		secretMgrMock := newMockSecretManager(t)
 		conflictErr := fmt.Errorf("%w: secret %q in namespace %q", sa.ErrSecretConflict, "grafana-to-prometheus", "ecosystem")
@@ -205,12 +205,12 @@ func TestController_Reconcile(t *testing.T) {
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
 		require.ErrorIs(t, err, sa.ErrSecretConflict)
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyFailed, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, cond.Reason)
 		assert.Contains(t, cond.Message, "not owned by this service account request")
 	})
 
@@ -222,7 +222,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		controller := New(rtClient, scheme)
 
@@ -231,12 +231,12 @@ func TestController_Reconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
 
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
 	})
 
 	t.Run("should return error for required SARE when producer is not found", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		factoryMock := newMockProducerClientFactory(t)
@@ -271,12 +271,12 @@ func TestController_Reconcile(t *testing.T) {
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
 		require.Error(t, err)
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyFailed, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, cond.Reason)
 	})
 
 	t.Run("should return error and set ServiceAccountReady=False when HTTP client fails", func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
@@ -300,9 +300,9 @@ func TestController_Reconcile(t *testing.T) {
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
 		require.Error(t, err)
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	})
@@ -336,7 +336,7 @@ func TestController_Reconcile(t *testing.T) {
 			WithObjects(&sare).
 			WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if _, ok := obj.(*serviceaccountv1.ServiceAccountProducer); ok {
+					if _, ok := obj.(*serviceaccountv2.ServiceAccountProducer); ok {
 						return errors.New("error while getting producer")
 					}
 					return c.Get(ctx, key, obj, opts...)
@@ -359,7 +359,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
 		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
@@ -378,9 +378,9 @@ func TestController_Reconcile(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to store credentials")
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
-		cond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	})
@@ -393,7 +393,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					return errors.New("status patch failed")
@@ -420,7 +420,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					return errors.New("status patch failed")
@@ -492,7 +492,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
@@ -521,7 +521,7 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, &sapr).
-			WithStatusSubresource(&serviceaccountv1.ServiceAccountRequest{}).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
@@ -542,15 +542,15 @@ func TestController_Reconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
 
-		var updated serviceaccountv1.ServiceAccountRequest
+		var updated serviceaccountv2.ServiceAccountRequest
 		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
 		require.NotNil(t, updated.Status.SecretRef)
 		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
 
-		saCond := findCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, saCond)
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
 }
 

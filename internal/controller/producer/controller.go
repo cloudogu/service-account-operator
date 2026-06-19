@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,7 +24,7 @@ type serviceAccountClient interface { //nolint:unused
 // clientFactory builds a client for a given ServiceAccountProducer, resolving the API key
 // from the referenced Kubernetes Secret.
 type clientFactory interface {
-	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (producerclient.ServiceAccountClient, error)
+	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv2.ServiceAccountProducer) (producerclient.ServiceAccountClient, error)
 }
 
 // Controller reconciles ServiceAccountProducer resources.
@@ -45,7 +45,7 @@ func New(rtClient client.Client) *Controller {
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountProducer", req.NamespacedName)
 
-	var sapr serviceaccountv1.ServiceAccountProducer
+	var sapr serviceaccountv2.ServiceAccountProducer
 	if err := c.client.Get(ctx, req.NamespacedName, &sapr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -68,19 +68,19 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 // checkReady validates the producer and probes its endpoint. On failure it returns the matching
 // ServiceAccountProducer condition reason together with the underlying error.
-func (c *Controller) checkReady(ctx context.Context, sapr *serviceaccountv1.ServiceAccountProducer) (string, error) {
+func (c *Controller) checkReady(ctx context.Context, sapr *serviceaccountv2.ServiceAccountProducer) (string, error) {
 	if sapr.Spec.HTTP == nil {
-		return serviceaccountv1.ConditionReadyReasonInvalidConfiguration, errors.New("producer has no HTTP spec configured")
+		return serviceaccountv2.ConditionReadyReasonInvalidConfiguration, errors.New("producer has no HTTP spec configured")
 	}
 
 	// HTTP spec is present, so the only thing NewForProducer can fail on is resolving the auth secret.
 	saClient, err := c.clientFactory.NewForProducer(ctx, sapr.Namespace, sapr)
 	if err != nil {
-		return serviceaccountv1.ConditionReadyReasonAuthSecretNotFound, err
+		return serviceaccountv2.ConditionReadyReasonAuthSecretNotFound, err
 	}
 
 	if err := saClient.Ready(ctx); err != nil {
-		return serviceaccountv1.ConditionReadyReasonConnectionFailed, err
+		return serviceaccountv2.ConditionReadyReasonConnectionFailed, err
 	}
 
 	return "", nil
@@ -88,7 +88,7 @@ func (c *Controller) checkReady(ctx context.Context, sapr *serviceaccountv1.Serv
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&serviceaccountv1.ServiceAccountProducer{}).
+		For(&serviceaccountv2.ServiceAccountProducer{}).
 		Named("serviceaccountproducer").
 		Complete(c)
 }

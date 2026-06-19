@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -16,7 +16,7 @@ import (
 )
 
 // buildStatusWriterClient returns a fake client with status subresource support for the given SARE.
-func buildStatusWriterClient(t *testing.T, sare *serviceaccountv1.ServiceAccountRequest) client.Client {
+func buildStatusWriterClient(t *testing.T, sare *serviceaccountv2.ServiceAccountRequest) client.Client {
 	t.Helper()
 	scheme := newTestScheme(t)
 	return fake.NewClientBuilder().
@@ -36,9 +36,9 @@ func buildStatusWriterClientWithoutObject(t *testing.T) client.Client {
 		Build()
 }
 
-func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccountv1.ServiceAccountRequest) serviceaccountv1.ServiceAccountRequest {
+func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccountv2.ServiceAccountRequest) serviceaccountv2.ServiceAccountRequest {
 	t.Helper()
-	var updated serviceaccountv1.ServiceAccountRequest
+	var updated serviceaccountv2.ServiceAccountRequest
 	require.NoError(t, c.Get(testCtx, types.NamespacedName{Name: sare.Name, Namespace: sare.Namespace}, &updated))
 	return updated
 }
@@ -55,10 +55,10 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyProducerNotFound, cond.Reason)
 		assert.Contains(t, cond.Message, "prometheus")
 	})
 }
@@ -74,10 +74,10 @@ func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyCreated, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, cond.Reason)
 	})
 }
 
@@ -93,10 +93,10 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReasonServiceAccountReadyFailed, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, cond.Reason)
 		assert.Contains(t, cond.Message, "connection refused")
 	})
 
@@ -109,7 +109,7 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 		err := newStatusWriter(rtClient, &sare).serviceAccountFailed(testCtx, errors.New("boom"))
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeServiceAccountReady)
+		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeServiceAccountReady)
 	})
 }
 
@@ -126,7 +126,7 @@ func TestStatusWriter_SequentialConditions(t *testing.T) {
 
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
 
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeServiceAccountReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 	})

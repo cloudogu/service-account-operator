@@ -5,7 +5,7 @@ package request
 import (
 	context "context"
 
-	v1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	v2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	producer "github.com/cloudogu/service-account-operator/internal/producer"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -24,7 +24,7 @@ func (_m *mockProducerClientFactory) EXPECT() *mockProducerClientFactory_Expecte
 }
 
 // NewForProducer provides a mock function with given fields: ctx, namespace, sapr
-func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error) {
+func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *v2.ServiceAccountProducer) (producer.ServiceAccountClient, error) {
 	ret := _m.Called(ctx, namespace, sapr)
 
 	if len(ret) == 0 {
@@ -33,10 +33,10 @@ func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespa
 
 	var r0 producer.ServiceAccountClient
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *v2.ServiceAccountProducer) (producer.ServiceAccountClient, error)); ok {
 		return rf(ctx, namespace, sapr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, *v1.ServiceAccountProducer) producer.ServiceAccountClient); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *v2.ServiceAccountProducer) producer.ServiceAccountClient); ok {
 		r0 = rf(ctx, namespace, sapr)
 	} else {
 		if ret.Get(0) != nil {
@@ -44,7 +44,7 @@ func (_m *mockProducerClientFactory) NewForProducer(ctx context.Context, namespa
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, *v1.ServiceAccountProducer) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, string, *v2.ServiceAccountProducer) error); ok {
 		r1 = rf(ctx, namespace, sapr)
 	} else {
 		r1 = ret.Error(1)
@@ -61,14 +61,14 @@ type mockProducerClientFactory_NewForProducer_Call struct {
 // NewForProducer is a helper method to define mock.On call
 //   - ctx context.Context
 //   - namespace string
-//   - sapr *v1.ServiceAccountProducer
+//   - sapr *v2.ServiceAccountProducer
 func (_e *mockProducerClientFactory_Expecter) NewForProducer(ctx interface{}, namespace interface{}, sapr interface{}) *mockProducerClientFactory_NewForProducer_Call {
 	return &mockProducerClientFactory_NewForProducer_Call{Call: _e.mock.On("NewForProducer", ctx, namespace, sapr)}
 }
 
-func (_c *mockProducerClientFactory_NewForProducer_Call) Run(run func(ctx context.Context, namespace string, sapr *v1.ServiceAccountProducer)) *mockProducerClientFactory_NewForProducer_Call {
+func (_c *mockProducerClientFactory_NewForProducer_Call) Run(run func(ctx context.Context, namespace string, sapr *v2.ServiceAccountProducer)) *mockProducerClientFactory_NewForProducer_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*v1.ServiceAccountProducer))
+		run(args[0].(context.Context), args[1].(string), args[2].(*v2.ServiceAccountProducer))
 	})
 	return _c
 }
@@ -78,7 +78,7 @@ func (_c *mockProducerClientFactory_NewForProducer_Call) Return(_a0 producer.Ser
 	return _c
 }
 
-func (_c *mockProducerClientFactory_NewForProducer_Call) RunAndReturn(run func(context.Context, string, *v1.ServiceAccountProducer) (producer.ServiceAccountClient, error)) *mockProducerClientFactory_NewForProducer_Call {
+func (_c *mockProducerClientFactory_NewForProducer_Call) RunAndReturn(run func(context.Context, string, *v2.ServiceAccountProducer) (producer.ServiceAccountClient, error)) *mockProducerClientFactory_NewForProducer_Call {
 	_c.Call.Return(run)
 	return _c
 }

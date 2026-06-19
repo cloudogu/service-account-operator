@@ -3,7 +3,7 @@ package producer
 import (
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -19,7 +19,7 @@ func newClientWithoutObject(t *testing.T) client.Client {
 	t.Helper()
 	return fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
-		WithStatusSubresource(&serviceaccountv1.ServiceAccountProducer{}).
+		WithStatusSubresource(&serviceaccountv2.ServiceAccountProducer{}).
 		Build()
 }
 
@@ -32,7 +32,7 @@ func TestMarkReady(t *testing.T) {
 
 		require.NoError(t, err)
 		updated := getUpdatedSAPR(t, rtClient, "example-producer", "default")
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Equal(t, reasonProducerReady, cond.Reason)
@@ -47,7 +47,7 @@ func TestMarkReady(t *testing.T) {
 		err := markReady(testCtx, rtClient, sapr)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeReady)
+		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeReady)
 	})
 }
 
@@ -57,14 +57,14 @@ func TestMarkNotReady(t *testing.T) {
 		rtClient := newClientWith(t, sapr)
 
 		err := markNotReady(testCtx, rtClient, sapr,
-			serviceaccountv1.ConditionReadyReasonConnectionFailed, "endpoint is not reachable")
+			serviceaccountv2.ConditionReadyReasonConnectionFailed, "endpoint is not reachable")
 
 		require.NoError(t, err)
 		updated := getUpdatedSAPR(t, rtClient, "example-producer", "default")
-		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv1.ConditionTypeReady)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
-		assert.Equal(t, serviceaccountv1.ConditionReadyReasonConnectionFailed, cond.Reason)
+		assert.Equal(t, serviceaccountv2.ConditionReadyReasonConnectionFailed, cond.Reason)
 		assert.Contains(t, cond.Message, "endpoint is not reachable")
 	})
 
@@ -73,16 +73,16 @@ func TestMarkNotReady(t *testing.T) {
 		rtClient := newClientWithoutObject(t)
 
 		err := markNotReady(testCtx, rtClient, sapr,
-			serviceaccountv1.ConditionReadyReasonAuthSecretNotFound, "secret missing")
+			serviceaccountv2.ConditionReadyReasonAuthSecretNotFound, "secret missing")
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv1.ConditionTypeReady)
+		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeReady)
 	})
 }
 
-func getUpdatedSAPR(t *testing.T, c client.Client, name, namespace string) serviceaccountv1.ServiceAccountProducer {
+func getUpdatedSAPR(t *testing.T, c client.Client, name, namespace string) serviceaccountv2.ServiceAccountProducer {
 	t.Helper()
-	var updated serviceaccountv1.ServiceAccountProducer
+	var updated serviceaccountv2.ServiceAccountProducer
 	require.NoError(t, c.Get(testCtx,
 		types.NamespacedName{Name: name, Namespace: namespace}, &updated))
 	return updated

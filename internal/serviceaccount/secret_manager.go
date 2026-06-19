@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,7 +31,7 @@ func NewSecretManager(c client.Client, scheme *runtime.Scheme) *SecretManager {
 
 // resolveSecretName returns the name of the Secret the credentials are written to:
 // spec.secretRef.name if set, otherwise the name of the SARE itself.
-func resolveSecretName(sare *serviceaccountv1.ServiceAccountRequest) string {
+func resolveSecretName(sare *serviceaccountv2.ServiceAccountRequest) string {
 	if sare.Spec.SecretRef != nil && sare.Spec.SecretRef.Name != "" {
 		return sare.Spec.SecretRef.Name
 	}
@@ -41,7 +41,7 @@ func resolveSecretName(sare *serviceaccountv1.ServiceAccountRequest) string {
 
 // Exists reports whether the target Secret for the given SARE already exists in the cluster and is owned by the SARE.
 // It returns ErrSecretConflict if the secret exists but is not owned by this SARE (no owner or a different owner).
-func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error) {
+func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error) {
 	name := resolveSecretName(sare)
 	var secret corev1.Secret
 	err := sm.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: name}, &secret)
@@ -63,7 +63,7 @@ func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv1.Serv
 // CreateOrUpdate creates or updates the Kubernetes Secret for the given SARE with the provided credentials.
 // It returns ErrSecretConflict if the secret exists but is not owned by the SARE.
 // It returns the name of the secret that was written.
-func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error) {
+func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error) {
 	secretName := resolveSecretName(sare)
 
 	secret := &corev1.Secret{

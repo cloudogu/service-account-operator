@@ -3,7 +3,7 @@ package producer
 import (
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -22,20 +22,20 @@ func newAuthSecret(name, namespace, key, value string) *corev1.Secret {
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
 	return scheme
 }
 
-func newTestSAPR(name, namespace, endpoint string) *serviceaccountv1.ServiceAccountProducer {
-	return &serviceaccountv1.ServiceAccountProducer{
+func newTestSAPR(name, namespace, endpoint string) *serviceaccountv2.ServiceAccountProducer {
+	return &serviceaccountv2.ServiceAccountProducer{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: serviceaccountv1.ServiceAccountProducerSpec{
+		Spec: serviceaccountv2.ServiceAccountProducerSpec{
 			Producer: name,
-			HTTP: &serviceaccountv1.HTTPProducer{
+			HTTP: &serviceaccountv2.HTTPProducer{
 				Endpoint: endpoint,
-				AuthSecret: serviceaccountv1.ServiceAccountProducerAuthSecret{
-					LocalSecretRef: serviceaccountv1.LocalSecretRef{Name: "prometheus-sa-secret"},
+				AuthSecret: serviceaccountv2.ServiceAccountProducerAuthSecret{
+					LocalSecretRef: serviceaccountv2.LocalSecretRef{Name: "prometheus-sa-secret"},
 					Key:            "apiKey",
 				},
 			},
@@ -61,11 +61,11 @@ func TestDefaultProducerClientFactory_NewForProducer(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 		factory := &DefaultProducerClientFactory{rtClient: rtClient}
 
-		sapr := &serviceaccountv1.ServiceAccountProducer{
+		sapr := &serviceaccountv2.ServiceAccountProducer{
 			ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
-			Spec: serviceaccountv1.ServiceAccountProducerSpec{
+			Spec: serviceaccountv2.ServiceAccountProducerSpec{
 				Producer: "prometheus",
-				Exec:     &serviceaccountv1.ExecProducer{Command: "/create-sa.sh", Selector: metav1.LabelSelector{}},
+				Exec:     &serviceaccountv2.ExecProducer{Command: "/create-sa.sh", Selector: metav1.LabelSelector{}},
 			},
 		}
 

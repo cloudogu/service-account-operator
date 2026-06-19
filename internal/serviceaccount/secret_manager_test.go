@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -23,17 +23,17 @@ var testCtx = context.Background()
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
 	return scheme
 }
 
-func newTestSARE(name, namespace string) *serviceaccountv1.ServiceAccountRequest {
-	return &serviceaccountv1.ServiceAccountRequest{
+func newTestSARE(name, namespace string) *serviceaccountv2.ServiceAccountRequest {
+	return &serviceaccountv2.ServiceAccountRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: serviceaccountv1.ServiceAccountRequestSpec{
+		Spec: serviceaccountv2.ServiceAccountRequestSpec{
 			Consumer:     "grafana",
-			ConsumerType: serviceaccountv1.DoguConsumerType,
+			ConsumerType: serviceaccountv2.DoguConsumerType,
 			Producer:     "prometheus",
 		},
 	}
@@ -106,7 +106,7 @@ func TestSecretManager_Exists(t *testing.T) {
 	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-creds"}
+		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-creds"}
 		existing := newOwnedSecret("custom-creds", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
@@ -141,7 +141,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 	t.Run("should create secret with name from spec.secretRef when set", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-prometheus-creds"}
+		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-prometheus-creds"}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
@@ -227,7 +227,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 	})
 }
 
-func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
+func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
 	t.Helper()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
