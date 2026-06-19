@@ -1,0 +1,22 @@
+{{- if .Values.global.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "service-account-operator.fullname" . }}-allow-prometheus-scraping
+  labels:
+    {{ include "service-account-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{ include "service-account-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              k8s-prometheus: prometheus-server
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}

@@ -1,6 +1,8 @@
 global:
   imagePullSecrets:
     - name: "ces-container-registries"
+  networkPolicies:
+    enabled: true
 manager:
   replicas: 1
   image:
@@ -16,3 +18,7 @@ manager:
   resourceRequests:
     cpu: 50m
     memory: 128Mi
+metrics:
+  serviceMonitor:
+    enabled: true
+    releaseLabel: k8s-prometheus
