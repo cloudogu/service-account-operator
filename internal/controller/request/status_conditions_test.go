@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-// buildStatusWriterClient returns a fake client with status subresource support for the given SARE.
-func buildStatusWriterClient(t *testing.T, sare *serviceaccountv2.ServiceAccountRequest) client.Client {
+// buildStatusClient returns a fake client with status subresource support for the given SARE.
+func buildStatusClient(t *testing.T, sare *serviceaccountv2.ServiceAccountRequest) client.Client {
 	t.Helper()
 	scheme := newTestScheme(t)
 	return fake.NewClientBuilder().
@@ -26,9 +26,9 @@ func buildStatusWriterClient(t *testing.T, sare *serviceaccountv2.ServiceAccount
 		Build()
 }
 
-// buildStatusWriterClientWithoutObject returns a fake client that has status subresource support
+// buildStatusClientWithoutObject returns a fake client that has status subresource support
 // configured but does NOT contain the SARE object, so Status().Patch() will fail with "not found".
-func buildStatusWriterClientWithoutObject(t *testing.T) client.Client {
+func buildStatusClientWithoutObject(t *testing.T) client.Client {
 	t.Helper()
 	scheme := newTestScheme(t)
 	return fake.NewClientBuilder().
@@ -43,13 +43,13 @@ func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccount
 	return updated
 }
 
-func TestStatusWriter_ProducerNotFound(t *testing.T) {
+func TestProducerNotFound(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with ProducerNotFound reason and persist to cluster", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
 		sare.Spec.Optional = true
-		rtClient := buildStatusWriterClient(t, &sare)
+		rtClient := buildStatusClient(t, &sare)
 
 		err := producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found"))
 
@@ -63,12 +63,12 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 	})
 }
 
-func TestStatusWriter_ServiceAccountReady(t *testing.T) {
+func TestServiceAccountReady(t *testing.T) {
 	t.Run("should set ServiceAccountReady=True and persist to cluster", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClient(t, &sare)
+		rtClient := buildStatusClient(t, &sare)
 
 		err := serviceAccountReady(testCtx, rtClient, &sare, "test-secret")
 
@@ -83,12 +83,12 @@ func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 	})
 }
 
-func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
+func TestServiceAccountFailed(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with error message and persist to cluster", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClient(t, &sare)
+		rtClient := buildStatusClient(t, &sare)
 
 		reconcileErr := errors.New("connection refused")
 		err := serviceAccountFailed(testCtx, rtClient, &sare, reconcileErr)
@@ -106,7 +106,7 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClientWithoutObject(t)
+		rtClient := buildStatusClientWithoutObject(t)
 
 		err := serviceAccountFailed(testCtx, rtClient, &sare, errors.New("boom"))
 
@@ -115,12 +115,12 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 	})
 }
 
-func TestStatusWriter_SequentialConditions(t *testing.T) {
+func TestSequentialConditions(t *testing.T) {
 	t.Run("should persist both conditions when called in sequence on the same SARE", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusWriterClient(t, &sare)
+		rtClient := buildStatusClient(t, &sare)
 
 		require.NoError(t, producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found")))
 		require.NoError(t, serviceAccountReady(testCtx, rtClient, &sare, "test-secret"))
