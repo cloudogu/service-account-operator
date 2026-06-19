@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -mod=mod
 FROM gcr.io/distroless/static:nonroot
 LABEL maintainer="hello@cloudogu.com" \
       NAME="service-account-operator" \
-      VERSION="0.0.1"
+      VERSION="0.1.0"
 
 WORKDIR /
 COPY --from=builder /workspace/service-account-operator .
