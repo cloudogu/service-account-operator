@@ -51,7 +51,7 @@ func TestStatusWriter_ProducerNotFound(t *testing.T) {
 		sare.Spec.Optional = true
 		rtClient := buildStatusWriterClient(t, &sare)
 
-		err := newStatusWriter(rtClient, &sare).producerNotFound(testCtx, "prometheus", fmt.Errorf("not found"))
+		err := producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found"))
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
@@ -70,7 +70,7 @@ func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusWriterClient(t, &sare)
 
-		err := newStatusWriter(rtClient, &sare).serviceAccountReady(testCtx)
+		err := serviceAccountReady(testCtx, rtClient, &sare, "test-secret")
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
@@ -78,6 +78,8 @@ func TestStatusWriter_ServiceAccountReady(t *testing.T) {
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, cond.Reason)
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "test-secret", updated.Status.SecretRef.Name)
 	})
 }
 
@@ -89,7 +91,7 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 		rtClient := buildStatusWriterClient(t, &sare)
 
 		reconcileErr := errors.New("connection refused")
-		err := newStatusWriter(rtClient, &sare).serviceAccountFailed(testCtx, reconcileErr)
+		err := serviceAccountFailed(testCtx, rtClient, &sare, reconcileErr)
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
@@ -106,7 +108,7 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusWriterClientWithoutObject(t)
 
-		err := newStatusWriter(rtClient, &sare).serviceAccountFailed(testCtx, errors.New("boom"))
+		err := serviceAccountFailed(testCtx, rtClient, &sare, errors.New("boom"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeServiceAccountReady)
@@ -114,15 +116,14 @@ func TestStatusWriter_ServiceAccountFailed(t *testing.T) {
 }
 
 func TestStatusWriter_SequentialConditions(t *testing.T) {
-	t.Run("should persist both conditions when called in sequence on the same writer", func(t *testing.T) {
+	t.Run("should persist both conditions when called in sequence on the same SARE", func(t *testing.T) {
 		sare := testSare
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusWriterClient(t, &sare)
-		sw := newStatusWriter(rtClient, &sare)
 
-		require.NoError(t, sw.producerNotFound(testCtx, "prometheus", fmt.Errorf("not found")))
-		require.NoError(t, sw.serviceAccountReady(testCtx))
+		require.NoError(t, producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found")))
+		require.NoError(t, serviceAccountReady(testCtx, rtClient, &sare, "test-secret"))
 
 		updated := getFreshSareFromCluster(t, rtClient, &sare)
 

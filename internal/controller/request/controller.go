@@ -79,12 +79,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
 	}
 
-	status := newStatusWriter(c.client, &sare)
-
 	exists, err := c.secretManager.Exists(ctx, &sare)
 	if err != nil {
 		if errors.Is(err, sa.ErrSecretConflict) {
-			return ctrl.Result{}, c.fail(ctx, status, err)
+			return ctrl.Result{}, c.fail(ctx, &sare, err)
 		}
 
 		logger.Error(err, "failed to check if service account secret exists")
@@ -95,12 +93,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if exists {
 		logger.Info("service account request needs to be updated")
 
-		return c.reconcileUpdate(ctx, &sare, status)
+		return c.reconcileUpdate(ctx, &sare)
 	}
 
 	logger.Info("service account request needs to be created")
 
-	return c.reconcileCreate(ctx, &sare, status)
+	return c.reconcileCreate(ctx, &sare)
 }
 
 // TODO(open question): When an optional service account is created only after the consumer has
@@ -109,7 +107,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
 // reload credentials on its own. Pending product decision before implementing.
 
-func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, status *statusWriter) (ctrl.Result, error) {
+func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
@@ -117,7 +115,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 		if apierrors.IsNotFound(err) {
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer, err)
+				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
 			}
 
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
@@ -128,21 +126,20 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 
 	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
 	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), sare.Spec.Params)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
 	}
 
-	sare.Status.SecretRef = &serviceaccountv2.LocalSecretRef{Name: secretName}
-	if err := status.serviceAccountReady(ctx); err != nil {
+	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
 
@@ -151,8 +148,8 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 
 // fail records a failed ServiceAccountReady condition and returns the original
 // error so the reconcile is retried with backoff.
-func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) error {
-	if patchErr := status.serviceAccountFailed(ctx, err); patchErr != nil {
+func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
+	if patchErr := serviceAccountFailed(ctx, c.client, sare, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
 
@@ -181,7 +178,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	return nil
 }
 
-func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, _ *statusWriter) (ctrl.Result, error) {
+func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
 	return ctrl.Result{}, nil
 }
