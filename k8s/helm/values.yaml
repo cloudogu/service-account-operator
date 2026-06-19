@@ -8,7 +8,7 @@ manager:
   image:
     registry: docker.io
     repository: cloudogu/service-account-operator
-    tag: 0.0.1
+    tag: 0.1.0
   imagePullPolicy: IfNotPresent
   env:
     logLevel: info
