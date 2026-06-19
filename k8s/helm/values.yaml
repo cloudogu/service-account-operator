@@ -1,0 +1,24 @@
+global:
+  imagePullSecrets:
+    - name: "ces-container-registries"
+  networkPolicies:
+    enabled: true
+manager:
+  replicas: 1
+  image:
+    registry: docker.io
+    repository: cloudogu/service-account-operator
+    tag: 0.1.0
+  imagePullPolicy: IfNotPresent
+  env:
+    logLevel: info
+    stage: production
+  resourceLimits:
+    memory: 128Mi
+  resourceRequests:
+    cpu: 50m
+    memory: 128Mi
+metrics:
+  serviceMonitor:
+    enabled: true
+    releaseLabel: k8s-prometheus

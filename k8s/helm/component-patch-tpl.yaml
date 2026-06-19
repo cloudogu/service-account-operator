@@ -1,0 +1,11 @@
+apiVersion: v1
+values:
+  images:
+    serviceAccountOperator: cloudogu/service-account-operator:0.1.0
+patches:
+  values.yaml:
+    manager:
+      image:
+        registry: "{{ registryFrom .images.serviceAccountOperator }}"
+        repository: "{{ repositoryFrom .images.serviceAccountOperator }}"
+        tag: "{{ tagFrom .images.serviceAccountOperator }}"

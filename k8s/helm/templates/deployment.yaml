@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    control-plane: controller-manager
+    {{ include "service-account-operator.labels" . | nindent 4 }}
+  name: {{ include "service-account-operator.fullname" . }}
+spec:
+  replicas: {{ .Values.manager.replicas | default 1 }}
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      {{ include "service-account-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+        {{ include "service-account-operator.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: "{{ .Values.manager.image.registry }}/{{ .Values.manager.image.repository }}:{{ .Values.manager.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.manager.imagePullPolicy }}
+          args:
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+            - --metrics-secure=false
+            # currently, there don't exist any k8s leader-election resources.
+            # These have to be re-created if they are going to be used as well as uncommenting the leader-elect flag
+            # - --leader-elect
+          env:
+            - name: STAGE
+              value: {{ .Values.manager.env.stage | default "production" | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.manager.env.logLevel | default "info" | quote }}
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              {{ toYaml .Values.manager.resourceLimits | nindent 14 }}
+            requests:
+              {{ toYaml .Values.manager.resourceRequests | nindent 14 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      securityContext:
+        # Distroless uses the nonroot user with UID/GID 65532. Set the numeric values explicitly
+        # so Kubernetes can verify runAsNonRoot without relying on name resolution from the image.
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: {{ include "service-account-operator.fullname" . }}
+      terminationGracePeriodSeconds: 15
