@@ -2,10 +2,11 @@ package request
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
@@ -27,15 +28,16 @@ const (
 
 // secretManager manages the Kubernetes Secret that holds a service account's credentials.
 type secretManager interface {
-	Exists(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (bool, error)
-	CreateOrUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, credentials map[string]string) (string, error)
-	Delete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error
+	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error)
+	CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error)
+	Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error
+
 }
 
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
 // resolving the API key from the referenced Kubernetes Secret.
 type producerClientFactory interface {
-	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (producer.ServiceAccountClient, error)
+	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv2.ServiceAccountProducer) (producer.ServiceAccountClient, error)
 }
 
 type k8sClient interface {
@@ -72,7 +74,7 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	var sare serviceaccountv1.ServiceAccountRequest
+	var sare serviceaccountv2.ServiceAccountRequest
 	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
 		logger.Error(err, "failed to get service account request")
 
@@ -96,6 +98,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	exists, err := c.secretManager.Exists(ctx, &sare)
 	if err != nil {
+		if errors.Is(err, sa.ErrSecretConflict) {
+			return ctrl.Result{}, c.fail(ctx, &sare, err)
+		}
+
 		logger.Error(err, "failed to check if service account secret exists")
 
 		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
@@ -118,16 +124,15 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
 // reload credentials on its own. Pending product decision before implementing.
 
-func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-	status := newStatusWriter(c.client, sare)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, status.producerNotFound(ctx, sare.Spec.Producer, err)
+				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
 			}
 
 			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
@@ -138,25 +143,20 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv1
 
 	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, err)
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), producer.NewParamsFromSpec(sare.Spec.Params))
+	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), sare.Spec.Params)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, status, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
 	}
 
-	sare.Status.SecretRef = &serviceaccountv1.LocalSecretRef{Name: secretName}
-	if err := status.producerReady(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
-	}
-
-	if err := status.serviceAccountReady(ctx); err != nil {
+	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
 
@@ -174,15 +174,15 @@ func (c *Controller) getServiceAccountClient(ctx context.Context, sare *servicea
 
 // fail records a failed ServiceAccountReady condition and returns the original
 // error so the reconcile is retried with backoff.
-func (c *Controller) fail(ctx context.Context, status *statusWriter, err error) error {
-	if patchErr := status.serviceAccountFailed(ctx, err); patchErr != nil {
+func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
+	if patchErr := serviceAccountFailed(ctx, c.client, sare, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
 
 	return err
 }
 
-func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
 	status := newStatusWriter(c.client, sare)
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
@@ -218,7 +218,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv1
 	return nil
 }
 
-func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
 	logger := logf.FromContext(ctx)
 	logger.Info("deleting service account", "serviceAccount", sare.Spec.Consumer)
 
@@ -270,13 +270,13 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	return nil
 }
 
-func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv1.ServiceAccountProducer, error) {
-	var sapr serviceaccountv1.ServiceAccountProducer
+func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv2.ServiceAccountProducer, error) {
+	var sapr serviceaccountv2.ServiceAccountProducer
 	if err := c.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
 		return nil, err
 	}
@@ -286,9 +286,9 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&serviceaccountv1.ServiceAccountRequest{}).
+		For(&serviceaccountv2.ServiceAccountRequest{}).
 		Watches(
-			&serviceaccountv1.ServiceAccountProducer{},
+			&serviceaccountv2.ServiceAccountProducer{},
 			handler.EnqueueRequestsFromMapFunc(c.enqueueRequestsForProducer),
 		).
 		Named("serviceaccountrequest").
@@ -301,7 +301,7 @@ func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := logf.FromContext(ctx).WithValues("producer", obj.GetName())
 
-	var sareList serviceaccountv1.ServiceAccountRequestList
+	var sareList serviceaccountv2.ServiceAccountRequestList
 	if err := c.client.List(ctx, &sareList, client.InNamespace(obj.GetNamespace())); err != nil {
 		logger.Error(err, "failed to list service account requests for producer event")
 		return nil
@@ -321,6 +321,6 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 
 // qualifiedConsumer returns a namespace-qualified consumer name to ensure uniqueness across namespaces.
 // For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
-func qualifiedConsumer(sare *serviceaccountv1.ServiceAccountRequest) string {
+func qualifiedConsumer(sare *serviceaccountv2.ServiceAccountRequest) string {
 	return sare.Spec.Consumer + "-" + sare.Namespace
 }

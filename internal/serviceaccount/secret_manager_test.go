@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -26,17 +26,17 @@ var testCtx = context.Background()
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	require.NoError(t, serviceaccountv1.AddToScheme(scheme))
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
 	return scheme
 }
 
-func newTestSARE(name, namespace string) *serviceaccountv1.ServiceAccountRequest {
-	return &serviceaccountv1.ServiceAccountRequest{
+func newTestSARE(name, namespace string) *serviceaccountv2.ServiceAccountRequest {
+	return &serviceaccountv2.ServiceAccountRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: serviceaccountv1.ServiceAccountRequestSpec{
+		Spec: serviceaccountv2.ServiceAccountRequestSpec{
 			Consumer:     "grafana",
-			ConsumerType: serviceaccountv1.DoguConsumerType,
+			ConsumerType: serviceaccountv2.DoguConsumerType,
 			Producer:     "prometheus",
 		},
 	}
@@ -68,7 +68,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		assert.True(t, exists)
 	})
 
-	t.Run("should return false when target secret exists but is not owned by this SARE", func(t *testing.T) {
+	t.Run("should return ErrSecretConflict when target secret exists but is not owned by this SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
 		existing := &corev1.Secret{
@@ -79,7 +79,7 @@ func TestSecretManager_Exists(t *testing.T) {
 		sm := NewSecretManager(rtClient, scheme)
 		exists, err := sm.Exists(testCtx, sare)
 
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrSecretConflict)
 		assert.False(t, exists)
 	})
 
@@ -109,7 +109,7 @@ func TestSecretManager_Exists(t *testing.T) {
 	t.Run("should resolve the custom secretRef name", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-creds"}
+		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-creds"}
 		existing := newOwnedSecret("custom-creds", "ecosystem", sare, scheme, t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
@@ -144,7 +144,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 	t.Run("should create secret with name from spec.secretRef when set", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		sare.Spec.SecretRef = &serviceaccountv1.LocalSecretRef{Name: "custom-prometheus-creds"}
+		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-prometheus-creds"}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
@@ -175,7 +175,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
 	})
 
-	t.Run("should set owner reference on pre-existing secret without ownerRef", func(t *testing.T) {
+	t.Run("should return ErrSecretConflict when secret exists without owner ref", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
 		sare.UID = "test-uid-123"
@@ -186,21 +186,15 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 
 		sm := NewSecretManager(rtClient, scheme)
 		_, err := sm.CreateOrUpdate(testCtx, sare, map[string]string{"key": "val"})
-		require.NoError(t, err)
 
-		var secret corev1.Secret
-		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &secret))
-		require.Len(t, secret.OwnerReferences, 1)
-		assert.Equal(t, "test-uid-123", string(secret.OwnerReferences[0].UID))
+		require.ErrorIs(t, err, ErrSecretConflict)
 	})
 
-	t.Run("should update existing secret credentials", func(t *testing.T) {
+	t.Run("should update existing secret credentials when secret is owned by this SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := newTestSARE("grafana-to-prometheus", "ecosystem")
-		existing := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-			StringData: map[string]string{"username": "old-user", "password": "old-pass"},
-		}
+		existing := newOwnedSecret("grafana-to-prometheus", "ecosystem", sare, scheme, t)
+		existing.StringData = map[string]string{"username": "old-user", "password": "old-pass"}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
@@ -236,7 +230,7 @@ func TestSecretManager_CreateOrUpdate(t *testing.T) {
 	})
 }
 
-func newOwnedSecret(name, namespace string, owner *serviceaccountv1.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
+func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
 	t.Helper()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},

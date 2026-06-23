@@ -3,7 +3,7 @@ module github.com/cloudogu/service-account-operator
 go 1.26.0
 
 require (
-	github.com/cloudogu/k8s-serviceaccount-lib v0.0.0-20260608130311-e5b6a5d4d399
+	github.com/cloudogu/k8s-serviceaccount-lib/v2 v2.0.1
 	github.com/go-logr/logr v1.4.3
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1

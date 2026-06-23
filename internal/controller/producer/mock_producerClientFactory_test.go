@@ -5,7 +5,7 @@ package producer
 import (
 	context "context"
 
-	v1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	v1 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	internalproducer "github.com/cloudogu/service-account-operator/internal/producer"
 	mock "github.com/stretchr/testify/mock"
 )

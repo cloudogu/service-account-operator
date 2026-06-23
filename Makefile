@@ -1,6 +1,6 @@
 # Set these to the desired values
 ARTIFACT_ID=service-account-operator
-VERSION=0.0.1
+VERSION=0.1.0
 IMAGE=cloudogu/${ARTIFACT_ID}:${VERSION}
 GOTAG=1.26.0
 MAKEFILES_VERSION=10.9.0

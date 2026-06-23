@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/controller/producer"
 	"github.com/cloudogu/service-account-operator/internal/controller/request"
@@ -34,7 +34,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(serviceaccountv1.AddToScheme(scheme))
+	utilruntime.Must(serviceaccountv2.AddToScheme(scheme))
 }
 
 func main() {

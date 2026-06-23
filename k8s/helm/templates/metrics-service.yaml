@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "service-account-operator.fullname" . }}-metrics
+  labels:
+    {{ include "service-account-operator.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    {{ include "service-account-operator.selectorLabels" . | nindent 4 }}

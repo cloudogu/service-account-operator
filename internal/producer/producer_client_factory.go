@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	serviceaccountv1 "github.com/cloudogu/k8s-serviceaccount-lib/api/v1"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,7 +21,7 @@ func NewClientFactory(rtClient client.Client) *DefaultProducerClientFactory {
 }
 
 // NewForProducer returns a ServiceAccountClient configured for the given producer's HTTP endpoint and API key.
-func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv1.ServiceAccountProducer) (ServiceAccountClient, error) {
+func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv2.ServiceAccountProducer) (ServiceAccountClient, error) {
 	if sapr.Spec.HTTP == nil {
 		return nil, fmt.Errorf("producer %q has no HTTP spec configured", sapr.Name)
 	}
@@ -35,7 +35,7 @@ func (f *DefaultProducerClientFactory) NewForProducer(ctx context.Context, names
 }
 
 // resolveAPIKey reads the producer's API key from the referenced Kubernetes Secret.
-func resolveAPIKey(ctx context.Context, rtClient client.Client, namespace string, authSecret serviceaccountv1.ServiceAccountProducerAuthSecret) (string, error) {
+func resolveAPIKey(ctx context.Context, rtClient client.Client, namespace string, authSecret serviceaccountv2.ServiceAccountProducerAuthSecret) (string, error) {
 	var secret corev1.Secret
 	if err := rtClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: authSecret.Name}, &secret); err != nil {
 		return "", fmt.Errorf("failed to get auth secret %q: %w", authSecret.Name, err)
