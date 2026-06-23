@@ -244,7 +244,7 @@ func TestSecretManager_Delete(t *testing.T) {
 		client func(*testing.T) client.Client
 	}
 	type args struct {
-		sare *serviceaccountv1.ServiceAccountRequest
+		sare *serviceaccountv2.ServiceAccountRequest
 	}
 	testCtx := context.Background()
 	tests := []struct {

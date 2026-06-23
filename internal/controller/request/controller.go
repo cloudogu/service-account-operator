@@ -31,7 +31,6 @@ type secretManager interface {
 	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error)
 	CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error)
 	Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error
-
 }
 
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
@@ -163,7 +162,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) getServiceAccountClient(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest, sapr *serviceaccountv1.ServiceAccountProducer) (serviceAccountClient, error) {
+func (c *Controller) getServiceAccountClient(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (serviceAccountClient, error) {
 	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service account client for producer %q: %w", sapr.Name, err)
@@ -183,7 +182,6 @@ func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAcc
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
-	status := newStatusWriter(c.client, sare)
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}
@@ -195,13 +193,13 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2
 
 	if err := c.deleteServiceAccount(ctx, sare); err != nil {
 		wrapErr := fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
-		return c.fail(ctx, status, wrapErr)
+		return c.fail(ctx, sare, wrapErr)
 	}
 
 	return c.removeFinalizer(ctx, sare)
 }
 
-func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}
@@ -227,7 +225,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		return fmt.Errorf("failed to delete secret for service account request %q: %w", sare.Name, err)
 	}
 
-	var sapr *serviceaccountv1.ServiceAccountProducer
+	var sapr *serviceaccountv2.ServiceAccountProducer
 	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {

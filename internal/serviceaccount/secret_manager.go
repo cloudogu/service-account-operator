@@ -95,7 +95,7 @@ func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccoun
 	return secretName, nil
 }
 
-func (sm *SecretManager) Delete(ctx context.Context, sare *serviceaccountv1.ServiceAccountRequest) error {
+func (sm *SecretManager) Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
 	secretName := resolveSecretName(sare)
 	err := sm.client.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: sare.Namespace}})
 	if err != nil {
