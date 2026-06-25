@@ -71,7 +71,7 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", req.Name)
 
 	var sare serviceaccountv2.ServiceAccountRequest
 	if err := c.client.Get(ctx, req.NamespacedName, &sare); client.IgnoreNotFound(err) != nil {
