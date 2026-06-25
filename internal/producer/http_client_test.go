@@ -146,6 +146,32 @@ func TestHTTPClient_Update(t *testing.T) {
 		assert.Equal(t, "secret", creds["password"])
 	})
 
+	t.Run("should send PUT with consumer and params in body but does not return credentials with HTTP 204", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPut, r.Method)
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, _ := io.ReadAll(r.Body)
+			var req createRequestBody
+			require.NoError(t, json.Unmarshal(body, &req))
+			assert.Equal(t, "grafana", req.Consumer)
+			assert.Equal(t, Params{"verbose": "haveChangeHere"}, req.Params)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNoContent)
+			// here are no credentials because the producer didn't change them
+		}))
+		defer server.Close()
+
+		client := NewHTTPClient(server.URL, "test-api-key")
+		creds, err := client.Update(testCtx, "grafana", Params{"verbose": "true"})
+
+		require.NoError(t, err)
+		assert.Nil(t, creds)
+	})
+
 	t.Run("should send empty params when Params is nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
