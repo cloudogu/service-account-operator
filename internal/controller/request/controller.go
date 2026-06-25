@@ -224,13 +224,10 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	logger := logf.FromContext(ctx)
 	logger.Info("deleting service account", "serviceAccount", sare.Spec.Consumer)
 
-	err := c.secretManager.Delete(ctx, sare)
-	if err != nil {
-		return fmt.Errorf("failed to delete secret for service account request %q: %w", sare.Name, err)
-	}
+	// explicitly deleting the secret would cause unnecessary reconciliation
+	// the secret is deleted via the controller reference anyway
 
-	var sapr *serviceaccountv2.ServiceAccountProducer
-	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("producer not found, skipping deletion of service account at producer", "producer", sare.Spec.Producer, "request", sare.Name)
