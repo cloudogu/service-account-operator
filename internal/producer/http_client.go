@@ -153,7 +153,7 @@ func (c *HttpClient) Update(ctx context.Context, consumer string, params Params)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, fmt.Errorf("producer %q rejected the request with %d; please check the API key in the SARE auth secret", c.endpoint, resp.StatusCode)
 	}
 
