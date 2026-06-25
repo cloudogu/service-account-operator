@@ -74,7 +74,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", req.Name)
 
 	var sare serviceaccountv2.ServiceAccountRequest
-	if err := c.client.Get(ctx, req.NamespacedName, &sare); client.IgnoreNotFound(err) != nil {
+	if err := c.client.Get(ctx, req.NamespacedName, &sare); apierrors.IsNotFound(err) {
+		logger.Info("service account request not found, skipping reconcile")
+
+		return ctrl.Result{}, nil
+	} else if err != nil {
 		logger.Error(err, "failed to get service account request")
 
 		return ctrl.Result{}, err
