@@ -295,6 +295,10 @@ func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to update service account at producer %q: %w", sapr.Name, err))
 	}
 
+	if credentials == nil {
+		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
+	}
+
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))

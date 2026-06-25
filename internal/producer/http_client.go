@@ -26,7 +26,8 @@ type Params map[string]string
 type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
-	// Update re-provisions an existing service account and returns the refreshed credentials.
+	// Update re-provisions an existing service account and returns the refreshed credentials. The credential map may
+	// be nil if no change occurred.
 	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
@@ -132,7 +133,7 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 }
 
 // Update calls a service account producer's API to idempotently modify a service account for the given consumer and
-// returns the credentials.
+// returns the credentials. The credential map may be nil if no change occurred.
 func (c *HttpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	bodyObj := updateRequestBody{createRequestBody{Consumer: consumer, Params: params}}
 	body, err := json.Marshal(bodyObj)
@@ -161,6 +162,10 @@ func (c *HttpClient) Update(ctx context.Context, consumer string, params Params)
 	if !slices.Contains(okayishStatusCodes, resp.StatusCode) {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("producer returned unexpected status %s on update for %q: %s", resp.Status, c.endpoint, string(respBody))
+	}
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
 	}
 
 	var credentials map[string]string
