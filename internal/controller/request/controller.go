@@ -269,7 +269,41 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 }
 
 func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
+	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+
+	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			if sare.Spec.Optional {
+				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
+				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
+			}
+
+			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
+		}
+
+		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	}
+
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	if err != nil {
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
+	}
+
+	credentials, err := saClient.Update(ctx, qualifiedConsumer(sare), sare.Spec.Params)
+	if err != nil {
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to update service account at producer %q: %w", sapr.Name, err))
+	}
+
+	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+	if err != nil {
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+	}
+
+	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful update for %q: %w", sare.Name, err)
+	}
+
 	return ctrl.Result{}, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -56,6 +57,10 @@ type createRequestBody struct {
 	Params   Params `json:"params,omitempty"`
 }
 
+type updateRequestBody struct {
+	createRequestBody
+}
+
 func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
@@ -89,7 +94,6 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	}
 }
 
-
 // Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
@@ -111,7 +115,7 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("producer %q rejected the request with 401 — check the API key in the auth secret", c.endpoint)
+		return nil, fmt.Errorf("producer %q rejected the request with 401; please check the API key in the auth secret", c.endpoint)
 	}
 
 	if resp.StatusCode != http.StatusCreated {
@@ -127,9 +131,44 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 	return credentials, nil
 }
 
-// Update is not yet implemented. The producer API requires a PUT endpoint that does not exist yet.
-func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]string, error) {
-	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
+// Update calls a service account producer's API to idempotently modify a service account for the given consumer and
+// returns the credentials.
+func (c *HttpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
+	bodyObj := updateRequestBody{createRequestBody{Consumer: consumer, Params: params}}
+	body, err := json.Marshal(bodyObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP put request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(apiKeyHeader, c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("update-serviceaccount (HTTP) request to producer %q failed: %w", c.endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("producer %q rejected the request with %d; please check the API key in the SARE auth secret", c.endpoint, resp.StatusCode)
+	}
+
+	okayishStatusCodes := []int{http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent}
+	if !slices.Contains(okayishStatusCodes, resp.StatusCode) {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("producer returned unexpected status %s on update for %q: %s", resp.Status, c.endpoint, string(respBody))
+	}
+
+	var credentials map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&credentials); err != nil {
+		return nil, fmt.Errorf("failed to decode producer response: %w", err)
+	}
+
+	return credentials, nil
 }
 
 // Ready checks the producer endpoint for basic readiness and returns an error if the endpoint is unreachable or returns a 5xx status.
