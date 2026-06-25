@@ -10,15 +10,20 @@ import (
 	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -285,13 +290,52 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&serviceaccountv2.ServiceAccountRequest{}).
+		For(&serviceaccountv2.ServiceAccountRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&corev1.Secret{}, builder.WithPredicates(wasDeletedPredicate())).
 		Watches(
 			&serviceaccountv2.ServiceAccountProducer{},
 			handler.EnqueueRequestsFromMapFunc(c.enqueueRequestsForProducer),
+			builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, producerGotReadyPredicate())),
 		).
 		Named("serviceaccountrequest").
 		Complete(c)
+}
+
+func producerGotReadyPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+			producerOld, ok := e.ObjectOld.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerOld == nil {
+				return false
+			}
+
+			producerNew, ok := e.ObjectNew.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerNew == nil {
+				return false
+			}
+
+			oldConditionNotReady := meta.IsStatusConditionFalse(producerOld.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			newConditionReady := meta.IsStatusConditionTrue(producerNew.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			return !oldConditionNotReady && newConditionReady
+		},
+	}
+}
+
+func wasDeletedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(event.TypedCreateEvent[client.Object]) bool {
+			return false
+		},
+		DeleteFunc: func(event.TypedDeleteEvent[client.Object]) bool {
+			return true
+		},
+		UpdateFunc: func(event.TypedUpdateEvent[client.Object]) bool {
+			return false
+		},
+		GenericFunc: func(event.TypedGenericEvent[client.Object]) bool {
+			return false
+		},
+	}
 }
 
 // enqueueRequestsForProducer maps a ServiceAccountProducer event to all SAREs in the same
