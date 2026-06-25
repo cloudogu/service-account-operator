@@ -157,7 +157,7 @@ func (c *HttpClient) Update(ctx context.Context, consumer string, params Params)
 		return nil, fmt.Errorf("producer %q rejected the request with %d; please check the API key in the SARE auth secret", c.endpoint, resp.StatusCode)
 	}
 
-	okayishStatusCodes := []int{http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent}
+	okayishStatusCodes := []int{http.StatusOK, http.StatusCreated, http.StatusNoContent}
 	if !slices.Contains(okayishStatusCodes, resp.StatusCode) {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("producer returned unexpected status %s on update for %q: %s", resp.Status, c.endpoint, string(respBody))
