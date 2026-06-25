@@ -74,10 +74,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := logf.FromContext(ctx)
 
 	var sare serviceaccountv2.ServiceAccountRequest
-	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
+	if err := c.client.Get(ctx, req.NamespacedName, &sare); client.IgnoreNotFound(err) != nil {
 		logger.Error(err, "failed to get service account request")
 
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 
 	if !sare.DeletionTimestamp.IsZero() {
