@@ -292,7 +292,8 @@ func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params)
+	// TODO determine the best way for the behavior params to come into existence
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, producer.BehaviorParams{})
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to update service account at producer %q: %w", sapr.Name, err))
 	}
