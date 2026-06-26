@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 var testCtx = context.Background()
@@ -146,6 +147,22 @@ func TestController_Reconcile(t *testing.T) {
 		result, err := controller.Reconcile(testCtx, reconcileRequest("missing", "ecosystem"))
 
 		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+	})
+
+	t.Run("should fail on error when getting SARE", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return assert.AnError
+			}}).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller := New(rtClient, scheme, testOperatorConfig, recorder)
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("get-error", "ecosystem"))
+
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to get service account request \"get-error\"")
 		assert.Equal(t, ctrl.Result{}, result)
 	})
 
@@ -1022,4 +1039,51 @@ func mockProducerFactory(t *testing.T, sapr *serviceaccountv2.ServiceAccountProd
 
 	factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(saClient, nil)
 	return factory
+}
+
+func Test_wasDeletedPredicate(t *testing.T) {
+	sut := wasDeletedPredicate()
+	assert.True(t, sut.Delete(event.TypedDeleteEvent[client.Object]{}))
+	assert.False(t, sut.Create(event.TypedCreateEvent[client.Object]{}))
+	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{}))
+	assert.False(t, sut.Generic(event.TypedGenericEvent[client.Object]{}))
+}
+
+func Test_producerGotReadyPredicate(t *testing.T) {
+	sut := producerGotReadyPredicate()
+	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
+		ObjectOld: &corev1.Pod{},
+	}))
+	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
+		ObjectOld: &serviceaccountv2.ServiceAccountProducer{},
+		ObjectNew: &corev1.Pod{},
+	}))
+	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
+		ObjectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+			Conditions: []metav1.Condition{{
+				Type:   serviceaccountv2.ConditionTypeReady,
+				Status: metav1.ConditionTrue,
+			}},
+		}},
+		ObjectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+			Conditions: []metav1.Condition{{
+				Type:   serviceaccountv2.ConditionTypeReady,
+				Status: metav1.ConditionFalse,
+			}},
+		}},
+	}))
+	assert.True(t, sut.Update(event.TypedUpdateEvent[client.Object]{
+		ObjectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+			Conditions: []metav1.Condition{{
+				Type:   serviceaccountv2.ConditionTypeReady,
+				Status: metav1.ConditionFalse,
+			}},
+		}},
+		ObjectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+			Conditions: []metav1.Condition{{
+				Type:   serviceaccountv2.ConditionTypeReady,
+				Status: metav1.ConditionTrue,
+			}},
+		}},
+	}))
 }
