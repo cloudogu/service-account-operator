@@ -93,7 +93,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	} else if err != nil {
 		logger.Error(err, "failed to get service account request")
 
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to get service account request %q: %w", req.Name, err)
 	}
 
 	if !sare.DeletionTimestamp.IsZero() {
