@@ -10,15 +10,21 @@ import (
 	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -49,8 +55,13 @@ type serviceAccountClient interface { //nolint:unused
 	producer.ServiceAccountClient
 }
 
-type StatusClient interface {
+//nolint:unused
+type statusClient interface {
 	client.SubResourceWriter
+}
+
+type eventRecorder interface {
+	events.EventRecorder
 }
 
 // Controller reconciles ServiceAccountRequest resources.
@@ -59,25 +70,31 @@ type Controller struct {
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
+	eventRecorder         eventRecorder
 }
 
-func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig) *Controller {
+func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) *Controller {
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
 		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
+		eventRecorder:         eventRecorder,
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", req.Name)
 
 	var sare serviceaccountv2.ServiceAccountRequest
-	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
+	if err := c.client.Get(ctx, req.NamespacedName, &sare); apierrors.IsNotFound(err) {
+		logger.Info("service account request not found, skipping reconcile")
+
+		return ctrl.Result{}, nil
+	} else if err != nil {
 		logger.Error(err, "failed to get service account request")
 
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, fmt.Errorf("failed to get service account request %q: %w", req.Name, err)
 	}
 
 	if !sare.DeletionTimestamp.IsZero() {
@@ -131,6 +148,13 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			// TODO: deleting the secret will only work once Create and Update have been joined together.
+			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
+			deleteErr := c.secretManager.Delete(ctx, sare)
+			if deleteErr != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete service account secret of deleted producer %q: %w", sapr.Name, deleteErr)
+			}
+
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
 				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
@@ -160,6 +184,8 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
+
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
 
 	return ctrl.Result{}, nil
 }
@@ -222,13 +248,10 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	logger := logf.FromContext(ctx)
 	logger.Info("deleting service account", "serviceAccount", sare.Spec.Consumer)
 
-	err := c.secretManager.Delete(ctx, sare)
-	if err != nil {
-		return fmt.Errorf("failed to delete secret for service account request %q: %w", sare.Name, err)
-	}
+	// explicitly deleting the secret would cause unnecessary reconciliation
+	// the secret is deleted via the controller reference anyway
 
-	var sapr *serviceaccountv2.ServiceAccountProducer
-	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("producer not found, skipping deletion of service account at producer", "producer", sare.Spec.Producer, "request", sare.Name)
@@ -267,6 +290,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		logger.Error(err, "failed to patch lastExecution status after successful delete", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
 	}
 
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountDeleted", "Deleted service account %q", sare.Spec.Consumer)
 	return nil
 }
 
@@ -326,13 +350,52 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	// TODO check jelemux' predicate logic and remove this todo
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&serviceaccountv2.ServiceAccountRequest{}).
+		For(&serviceaccountv2.ServiceAccountRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&corev1.Secret{}, builder.WithPredicates(wasDeletedPredicate())).
 		Watches(
 			&serviceaccountv2.ServiceAccountProducer{},
 			handler.EnqueueRequestsFromMapFunc(c.enqueueRequestsForProducer),
+			builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, producerGotReadyPredicate())),
 		).
 		Named("serviceaccountrequest").
 		Complete(c)
+}
+
+func producerGotReadyPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+			producerOld, ok := e.ObjectOld.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerOld == nil {
+				return false
+			}
+
+			producerNew, ok := e.ObjectNew.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerNew == nil {
+				return false
+			}
+
+			oldConditionNotReady := meta.IsStatusConditionFalse(producerOld.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			newConditionReady := meta.IsStatusConditionTrue(producerNew.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			return oldConditionNotReady && newConditionReady
+		},
+	}
+}
+
+func wasDeletedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(event.TypedCreateEvent[client.Object]) bool {
+			return false
+		},
+		DeleteFunc: func(event.TypedDeleteEvent[client.Object]) bool {
+			return true
+		},
+		UpdateFunc: func(event.TypedUpdateEvent[client.Object]) bool {
+			return false
+		},
+		GenericFunc: func(event.TypedGenericEvent[client.Object]) bool {
+			return false
+		},
+	}
 }
 
 // enqueueRequestsForProducer maps a ServiceAccountProducer event to all SAREs in the same

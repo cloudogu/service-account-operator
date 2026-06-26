@@ -34,6 +34,7 @@ type OperatorConfig struct {
 	ControllerOptions ctrl.Options
 
 	// DeletionTimeout is the time to wait for a resource to be deleted before giving up.
+	// The default value is supplied by the values.yaml.
 	DeletionTimeout time.Duration
 }
 

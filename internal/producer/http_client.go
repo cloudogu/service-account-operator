@@ -95,7 +95,6 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	resp, err := c.client.Do(req)
