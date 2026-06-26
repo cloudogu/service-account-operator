@@ -182,7 +182,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
 
-	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
 
 	return ctrl.Result{}, nil
 }
@@ -287,7 +287,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		logger.Error(err, "failed to patch lastExecution status after successful delete", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
 	}
 
-	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountDeleted", "Deleted service account %q", sare.Spec.Consumer)
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountDeleted", "Deleted service account %q", sare.Spec.Consumer)
 	return nil
 }
 
