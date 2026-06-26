@@ -138,6 +138,13 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			// TODO: deleting the secret will only work once Create and Update have been joined together.
+			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
+			deleteErr := c.secretManager.Delete(ctx, sare)
+			if deleteErr != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete service account secret of deleted producer %q: %w", sapr.Name, deleteErr)
+			}
+
 			if sare.Spec.Optional {
 				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
 				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
