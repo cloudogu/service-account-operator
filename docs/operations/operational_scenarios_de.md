@@ -7,9 +7,19 @@ Dogu-Trennung notwendig machten.
 
 Mit der Dogu-API v3 ist dies für Hilfscontainer nicht mehr nötig, da Dogu Helm-Charts eigene, weitere beliebige
 Container hervorbringen können, für deren Zugriff kein CES-übergreifender Mechanismus nötig ist. Allerdings ist es
-weiterhin möglich, das Dogus miteinander kommunizieren können. Hierzu werden weiterhin DSA benötigt. Darüber hinaus
-gelten DSA nicht nur für Dogus, sondern auch für CES-Komponenten. Beide können sowohl als DSA-Consumer und/oder als DSA
+weiterhin möglich, das Dogus miteinander kommunizieren können. Hierzu werden weiterhin Dogu-API v3 Service Accounts
+(DSA) benötigt. Diese DSA nicht nur für Dogus, sondern auch für CES-Komponenten, die auf Dogus oder andere
+CES-Komponenten per API zugreichen möchten. Beide können sowohl als DSA-Consumer und/oder als DSA
 Producer auftreten.
+
+Es können viele verschiedene Dogus oder Komponenten bei einem DSA-Producer einen DSA erbitten, sodass einer SAPR
+CR mehrere SARE CRs gegenüber stehen. Die Zuordnung eines SAREs zu einem SAPR bleibt davon aber unbeschadet. Die
+folgende Grafik zeigt wie Service-Account-Operator, DSA-Consumer und Producer im Verhältnis stehen.
+
+![Ein einzelner DSA-Producer (unbestimmt, ob Dogu oder Component) enthält einen SAPR mit dem Producernamen "gareth". Demgegenüber stehen sowohl ein DSA-Consumer-Dogu und eine DSA-Consumer-Komponente, die ihrerseits einen DSA mit dem Producernamen "gareth" erfragen. Der Service-Account-Operator erkennt die Übereinstimmung und erzeugt jeweils ein Secret, welches das DSA zwischen Consumer und Producer entspricht.](images/relationship_sare_sapr.drawio.png "DSA-Beziehung zwischen unterschiedlichen DSA-Consumern und einem DSA-Producer")
+
+Damit der Prozess der DSA-Erzeugung/Updates/Löschung erfolgreich durchgeführt werden kann, muss das Dogu/die Komponente
+die _Service Account Producer API_ implementieren. Diese liegt als [OpenAPI-Spezifikation vor](openapi.yaml).
 
 Dieses Dokument beschreibt Szenarien, in denen DSAs erzeugt, modifiziert oder gelöscht werden.
 
@@ -18,7 +28,7 @@ _* Law & Order Special Victims Unit dumdumm sound *_
 ## DSA erzeugen
 
 Im Gegensatz zur DSA-Modifikation gibt es für eine DSA-Erzeugung nur ein einziges Szenario. Es benötigt zwei Ressourcen,
-damit erfolgreich ein Dogu Service Account (DSA) benutzt werden kann:
+damit erfolgreich ein DSA benutzt werden kann:
 
 1. Existenz einer Service Account Request CR (`SARE`)
    - dies entspricht einem DSA-Consumer
@@ -28,11 +38,7 @@ damit erfolgreich ein Dogu Service Account (DSA) benutzt werden kann:
 Wenn die Anforderung von SARE und SAPR in dem jeweiligen Feld `.spec.producer` übereinstimmen, dann erzeugt der Service
 Account Operator durch API-Call auf den DSA-Producer ein Credential und legt dieses in einem wohlbekannten Secret ab.
 
-Natürlich können viele verschiedene Dogus oder Komponenten bei einem DSA-Producer einen DSA erbitten, sodass einer SAPR
-CR mehrere SARE CRs gegenüber stehen. Die Zuordnung eines SAREs zu einem SAPR bleibt davon aber unbeschadet. Die
-folgende Grafik zeigt wie Service-Account-Operator, DSA-Consumer und Producer im Verhältnis stehen.
-
-![Ein einzelner DSA-Producer (unbestimmt, ob Dogu oder Component) enthält einen SAPR mit dem Producernamen "gareth". Demgegenüber stehen sowohl ein DSA-Consumer-Dogu und eine DSA-Consumer-Komponente, die ihrerseits einen DSA mit dem Producernamen "gareth" erfragen. Der Service-Account-Operator erkennt die Übereinstimmung und erzeugt jeweils ein Secret, welches das DSA zwischen Consumer und Producer entspricht.](images/relationship_sare_sapr.drawio.png "DSA-Beziehung zwischen unterschiedlichen DSA-Consumern und einem DSA-Producer")
+![Ein Consumer deployt ein SARE zu einem existierenden SAPR. Der Service Account Operator erkennt dies und stellt einen Endpunkt-Request gegenüber einem Service Account Producer Service. Dieser implementiert die Service Account Producer API aus dem Operator. Der Service ist ein Sidecar im Producer nur für diesen Zweck. Dieser erzeugt, aktualisiert oder löscht mittels der eigentlichen Nutzanwendung den gewünschten Datenzustand. Hierbei fällt (nicht bei Delete) ein Credential heraus, das die API wieder an den Operator zurückgibt. Der Operator schreibt das Credential in das vom SARE genannten Secret und übereignet dem Consumer das Secret. Der Consumer kann nun den DSA verwenden.](images/saOperator_calls_dogu_saService.drawio.png "Abbildung des Prozesses wie ein DSA Consumer einen SARE deployt. Der Service Account Operator erzeugt mittels Producer ein Secret")
 
 Wenn ein SARE existiert, zu dem der Service-Account-Operator keinen SAPR finden kann, dann wird der SARE mit einer
 aussagekräftigen Condition versehen. Diese SARE wird erst dann wieder vom Operator betrachtet, wenn eine entsprechende
@@ -80,6 +86,9 @@ Dies kann auch manuell angestoßen werden, z. B. im Falle eines Datenleaks.
 Für eine Rotation muss allerdings der DSA-Producer eine Aktualisierung von Credentials unterstützen. Bei Erfolg wird
 garantiert das DSA-Secret aktualisiert, d. h. der DSA-Consumer muss auf diese Änderung reagieren (bei EnvVars ein
 Pod-Neustart, bei Dateimounts ein neues Auslesen der Datei etc).
+
+> TODO Secret rotieren durch Secret-Löschung
+>
 
 ### DSA-Producer wird deinstalliert
 
