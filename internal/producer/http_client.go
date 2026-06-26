@@ -65,7 +65,6 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	resp, err := c.client.Do(req)
@@ -88,7 +87,6 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 		return false, fmt.Errorf("producer returned unexpected status %d for %q", resp.StatusCode, c.endpoint)
 	}
 }
-
 
 // Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
