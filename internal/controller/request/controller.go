@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,20 +59,26 @@ type StatusClient interface {
 	client.SubResourceWriter
 }
 
+type eventRecorder interface {
+	events.EventRecorder
+}
+
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
 	client                k8sClient
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
+	eventRecorder         eventRecorder
 }
 
-func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig) *Controller {
+func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) *Controller {
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
 		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
+		eventRecorder:         eventRecorder,
 	}
 }
 
@@ -174,6 +181,8 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
 	}
+
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
 
 	return ctrl.Result{}, nil
 }
@@ -278,6 +287,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		logger.Error(err, "failed to patch lastExecution status after successful delete", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
 	}
 
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountDeleted", "Deleted service account %q", sare.Spec.Consumer)
 	return nil
 }
 
