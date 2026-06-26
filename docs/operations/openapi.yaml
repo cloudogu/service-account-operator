@@ -1,0 +1,95 @@
+openapi: 3.0.1
+info:
+  title: Service Account Management API
+  version: '1.0'
+servers:
+  - url: http://localhost:8080/serviceaccounts
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-CES-SA-API-KEY
+security:
+  - ApiKeyAuth: []
+paths:
+  /:
+    put:
+      description: Update an existing Service Account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                consumer:
+                  type: string
+                params:
+                  type: array
+                  items:
+                    type: string
+              required: ["consumer"]
+      responses:
+        '200':
+          description: Service Account updated successfully with changes from the service account producer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: object
+                    additionalProperties:
+                      type: string
+              examples:
+                usernamePassword:
+                  value:
+                    credentials:
+                      account: "(updated from username) heads-up:"
+                      shareSecret: "(updated from password) even the structure could change"
+                apiKey:
+                  value:
+                    credentials:
+                      apiKey: "secretApiKey"
+        '201':
+          description: Service Account created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: object
+                    additionalProperties:
+                      type: string
+              examples:
+                usernamePassword:
+                  value:
+                    credentials:
+                      account: "(updated from username) heads-up:"
+                      shareSecret: "(updated from password) even the structure could change"
+                apiKey:
+                  value:
+                    credentials:
+                      apiKey: "secrets can change on update, too"
+        '204':
+          description: Service Account updated only by side effect, not affecting the shared secret
+        '400':
+          description: Invalid input
+        '401':
+          description: Unauthorized
+  /{consumer}:
+    delete:
+      description: Deletes a Service Account for a given consumer
+      parameters:
+        - name: consumer
+          in: path
+          description: Name of the consumer
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Successfully deleted the Service Account for the given consumer
+        '401':
+          description: Unauthorized
