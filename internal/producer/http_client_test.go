@@ -25,7 +25,7 @@ func TestHTTPClient_Create(t *testing.T) {
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			require.NoError(t, json.Unmarshal(body, &req))
 			assert.Equal(t, "grafana", req.Consumer)
 			assert.Equal(t, Params{"verbose": "true"}, req.Params)
@@ -47,7 +47,7 @@ func TestHTTPClient_Create(t *testing.T) {
 	t.Run("should send empty params when Params is nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			_ = json.Unmarshal(body, &req)
 			assert.Empty(t, req.Params)
 
@@ -129,7 +129,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			require.NoError(t, json.Unmarshal(body, &req))
 			assert.Equal(t, "grafana", req.Consumer)
 			assert.Equal(t, Params{"verbose": "true"}, req.Params)
@@ -141,7 +141,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"})
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"}, BehaviorParams{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "grafana-user", creds["username"])
@@ -156,7 +156,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			require.NoError(t, json.Unmarshal(body, &req))
 			assert.Equal(t, "grafana", req.Consumer)
 			assert.Equal(t, Params{"verbose": "haveChangeHere"}, req.Params)
@@ -168,7 +168,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"})
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "haveChangeHere"}, BehaviorParams{})
 
 		require.NoError(t, err)
 		assert.Nil(t, creds)
@@ -177,7 +177,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 	t.Run("should send empty params when Params is nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			_ = json.Unmarshal(body, &req)
 			assert.Empty(t, req.Params)
 
@@ -187,7 +187,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		creds, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		creds, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "abc", creds["apiKey"])
@@ -200,7 +200,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "producer returned unexpected status 400")
@@ -213,7 +213,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "wrong-key")
-		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "rejected the request with 401; please check the API key in the SARE auth secret")
@@ -221,15 +221,15 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 
 	t.Run("should return error when server is unreachable", func(t *testing.T) {
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "update-serviceaccount (HTTP) request to producer \"http://127.0.0.1:1\" failed:")
+		assert.ErrorContains(t, err, "http serviceaccount request to producer \"http://127.0.0.1:1\" failed:")
 	})
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to create HTTP put request: parse \"://invalid\": missing protocol scheme")
@@ -243,7 +243,7 @@ func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode producer response")
@@ -428,4 +428,51 @@ func TestHttpClient_Exists(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestBehaviorParams(t *testing.T) {
+	t.Run("should marshal minimal body properly", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			Params:         nil,
+			BehaviorParams: BehaviorParams{},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer"}`, string(actual))
+	})
+	t.Run("should marshal maximal body", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			Params:         map[string]string{"key": "value"},
+			BehaviorParams: BehaviorParams{RotateSaImmediately},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer","params":{"key":"value"},"behaviorParams":{"rotateServiceAccount":1}}`, string(actual))
+	})
+	t.Run("should suppress rotation zero value", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			BehaviorParams: BehaviorParams{RotateSaNotNow},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer"}`, string(actual))
+	})
 }

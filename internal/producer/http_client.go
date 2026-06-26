@@ -19,8 +19,26 @@ const (
 	defaultTimeout30secs = 30 * time.Second
 )
 
-// Params is the list of parameters forwarded to the producer when creating a service account.
+// Params is the list of parameters forwarded to the producer when creating or updating a service account. These
+// parameters are usually optional, anyhow developers of Service Account consumers are strongly asked to check the
+// producers requirements.
 type Params map[string]string
+
+const (
+	RotateSaNotNow BehaviorParamsRotation = iota
+	RotateSaImmediately
+)
+
+// BehaviorParamsRotation indicates ways of how a Service Account's credential should be rotated.
+type BehaviorParamsRotation int
+
+// BehaviorParams may be used to by a consumer (via their SARE) to trigger actions towards the Service Account producer.
+type BehaviorParams struct {
+	// RotateServiceAccount indicates if a Service Account's credential should be rotated. This field must be ignored
+	// during the first creation of a Service Account (because there is nothing to rotate).
+	// This field is optional and defaults to [RotateSaNotNow].
+	RotateServiceAccount BehaviorParamsRotation `json:"rotateServiceAccount,omitempty"`
+}
 
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
@@ -29,7 +47,7 @@ type ServiceAccountClient interface {
 	// Deprecated: use CreateOrUpdate instead
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// CreateOrUpdate creates a service account or re-provisions (aka rotating) an existing service account and returns the refreshed credentials. The credential map may be nil if no change occurred.
-	CreateOrUpdate(ctx context.Context, consumer string, params Params) (map[string]string, error)
+	CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
 	// Ready returns nil when the producer endpoint is reachable
@@ -54,13 +72,15 @@ func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 	}
 }
 
-type createRequestBody struct {
+type createOrUpdateRequestBody struct {
+	// Consumer contains the identifier of the Service Account Consumer. This field is required.
 	Consumer string `json:"consumer"`
-	Params   Params `json:"params,omitempty"`
-}
-
-type updateRequestBody struct {
-	createRequestBody
+	// Params contains key/value parameters upon the producer modifies the service account creation/update. These
+	// parameters are usually optional, anyhow developers of Service Account consumers are strongly asked to check the
+	// producers requirements.
+	Params Params `json:"params,omitempty"`
+	// BehaviorParams contain information in which the Service Account producer may be triggered for an action. This field is strictly optional.
+	BehaviorParams BehaviorParams `json:"behaviorParams,omitzero"`
 }
 
 // Exists checks if any Service Account exists for the consumer and returns true if the Producer API indicates so.
@@ -104,7 +124,7 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 // Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
 // Deprecated: use CreateOrUpdate instead
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
+	body, err := json.Marshal(createOrUpdateRequestBody{Consumer: consumer, Params: params})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
@@ -139,13 +159,14 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 	return credentials, nil
 }
 
-// CreateOrUpdate calls a service account producer's API to idempotently modify a service account for the given consumer and
-// returns the credentials. The credential map may be nil if no change occurred.
-func (c *HttpClient) CreateOrUpdate(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	bodyObj := updateRequestBody{createRequestBody{Consumer: consumer, Params: params}}
-	body, err := json.Marshal(bodyObj)
+// CreateOrUpdate calls a service account producer's API to idempotently modify a service account for the given consumer
+// and returns the credentials. The credential map may be nil if no change occurred.
+func (c *HttpClient) CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error) {
+	// use a pointer to behaviorParams so the json marshaller will properly omit it
+	bodyObject := createOrUpdateRequestBody{Consumer: consumer, Params: params, BehaviorParams: behaviorParams}
+	body, err := json.Marshal(bodyObject)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		return nil, fmt.Errorf("failed to marshal service account request body for consumer %s: %w", consumer, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.endpoint, bytes.NewReader(body))
