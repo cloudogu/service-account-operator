@@ -333,7 +333,7 @@ func producerGotReadyPredicate() predicate.Predicate {
 
 			oldConditionNotReady := meta.IsStatusConditionFalse(producerOld.Status.Conditions, serviceaccountv2.ConditionTypeReady)
 			newConditionReady := meta.IsStatusConditionTrue(producerNew.Status.Conditions, serviceaccountv2.ConditionTypeReady)
-			return !oldConditionNotReady && newConditionReady
+			return oldConditionNotReady && newConditionReady
 		},
 	}
 }
