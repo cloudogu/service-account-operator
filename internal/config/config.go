@@ -61,6 +61,8 @@ func NewOperatorConfig(scheme *runtime.Scheme) (*OperatorConfig, error) {
 	}, nil
 }
 
+// getDeletionTimeout parses the deletion timeout from the environment variable
+// the default is supplied by the values.yaml
 func getDeletionTimeout() (time.Duration, error) {
 	deletionTimeout, err := getEnvVar(deletionTimeoutEnvVar)
 	if err != nil {
