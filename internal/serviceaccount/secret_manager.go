@@ -13,19 +13,24 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+type k8sClient interface {
+	client.Client
+}
 
 // ErrSecretConflict is returned when the target Secret already exists in the cluster but is not
 // owned (via controller OwnerReference) by the ServiceAccountRequest that wants to use it.
 var ErrSecretConflict = errors.New("secret already exists and is not owned by this service account request")
 
 type SecretManager struct {
-	client client.Client
+	client k8sClient
 	scheme *runtime.Scheme
 }
 
 // NewSecretManager creates a SecretManager that writes Secrets in the cluster.
-func NewSecretManager(c client.Client, scheme *runtime.Scheme) *SecretManager {
+func NewSecretManager(c k8sClient, scheme *runtime.Scheme) *SecretManager {
 	return &SecretManager{client: c, scheme: scheme}
 }
 
@@ -88,4 +93,18 @@ func (sm *SecretManager) CreateOrUpdate(ctx context.Context, sare *serviceaccoun
 	}
 
 	return secretName, nil
+}
+
+func (sm *SecretManager) Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	secretName := resolveSecretName(sare)
+	err := sm.client.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: sare.Namespace}})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name).Info(fmt.Sprintf("secret %q not found, skipping deletion but continue process", secretName))
+			return nil
+		}
+		return fmt.Errorf("failed to delete secret %q for service account request %q: %w", secretName, sare.Name, err)
+	}
+
+	return nil
 }

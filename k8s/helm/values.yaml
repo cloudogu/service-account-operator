@@ -13,6 +13,8 @@ manager:
   env:
     logLevel: info
     stage: production
+    # if the cleanup of dependent resources of the service account request fails, the operator will remove the request's finalizer after this timeout
+    deletionTimeout: 24h # Set this value to a shorter time to avoid hanging resources while cleaning up dev clusters
   resourceLimits:
     memory: 128Mi
   resourceRequests:

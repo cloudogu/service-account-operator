@@ -128,6 +128,63 @@ func (_c *MockServiceAccountClient_Delete_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// Exists provides a mock function with given fields: ctx, consumer
+func (_m *MockServiceAccountClient) Exists(ctx context.Context, consumer string) (bool, error) {
+	ret := _m.Called(ctx, consumer)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Exists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, consumer)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, consumer)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, consumer)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockServiceAccountClient_Exists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exists'
+type MockServiceAccountClient_Exists_Call struct {
+	*mock.Call
+}
+
+// Exists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - consumer string
+func (_e *MockServiceAccountClient_Expecter) Exists(ctx interface{}, consumer interface{}) *MockServiceAccountClient_Exists_Call {
+	return &MockServiceAccountClient_Exists_Call{Call: _e.mock.On("Exists", ctx, consumer)}
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) Run(run func(ctx context.Context, consumer string)) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) Return(_a0 bool, _a1 error) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Ready provides a mock function with given fields: ctx
 func (_m *MockServiceAccountClient) Ready(ctx context.Context) error {
 	ret := _m.Called(ctx)

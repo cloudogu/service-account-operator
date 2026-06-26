@@ -26,6 +26,7 @@ rules:
       - list
       {{/* watch is actually needed by the controller-runtime client for caching */}}
       - watch
+      - delete
   - apiGroups:
       - k8s.cloudogu.com
     resources:

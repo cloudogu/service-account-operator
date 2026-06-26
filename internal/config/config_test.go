@@ -1,10 +1,14 @@
 package config
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -51,6 +55,18 @@ func TestNewOperatorConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("should return error on error reading deletion timeout", func(t *testing.T) {
+		// given
+		t.Setenv(namespaceEnvVar, "testNamespace")
+
+		// when
+		_, err := NewOperatorConfig(testScheme)
+
+		// then
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to read deletion timeout")
+	})
+
 	t.Run("should use configured namespace and return controller options", func(t *testing.T) {
 		resetFlagStateForTest(t, []string{
 			"--metrics-bind-address=:9443",
@@ -61,6 +77,7 @@ func TestNewOperatorConfig(t *testing.T) {
 		})
 		t.Setenv(StageEnvVar, StageDevelopment)
 		t.Setenv(namespaceEnvVar, "ecosystem")
+		t.Setenv(deletionTimeoutEnvVar, "24h")
 
 		oldStage := Stage
 		oldLog := log
@@ -74,6 +91,7 @@ func TestNewOperatorConfig(t *testing.T) {
 		logMock.EXPECT().Enabled(0).Return(true).Maybe()
 		logMock.EXPECT().Info(0, "starting in development mode").Return()
 		logMock.EXPECT().Info(0, "deploying the service-account-operator in namespace ecosystem").Return()
+		logMock.EXPECT().Info(0, "using deletion timeout 24h0m0s to avoid hanging resources").Return()
 		log = logr.New(logMock)
 
 		actual, err := NewOperatorConfig(testScheme)
@@ -288,4 +306,57 @@ func overrideLookupEnvForTest(t *testing.T, fn func(string) (string, bool)) {
 	t.Cleanup(func() {
 		lookupEnv = oldLookupEnv
 	})
+}
+
+func Test_getDeletionTimeout(t *testing.T) {
+	tests := []struct {
+		name        string
+		prepareTest func(t *testing.T)
+		want        time.Duration
+		wantErr     assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return error on missing env var",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(deletionTimeoutEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(deletionTimeoutEnvVar, oldEnv))
+				})
+				require.NoError(t, os.Unsetenv(deletionTimeoutEnvVar))
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to get env var [DELETION_TIMEOUT]")
+			},
+		},
+		{
+			name: "should return error on invalid env var value",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(deletionTimeoutEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(deletionTimeoutEnvVar, oldEnv))
+				})
+				t.Setenv(deletionTimeoutEnvVar, "invalid")
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to parse env var [DELETION_TIMEOUT] with value [invalid]")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.prepareTest != nil {
+				tt.prepareTest(t)
+			}
+
+			got, err := getDeletionTimeout()
+
+			if tt.wantErr != nil {
+				tt.wantErr(t, err, "getDeletionTimeout() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if got != tt.want {
+				t.Errorf("getDeletionTimeout() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
