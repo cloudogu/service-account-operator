@@ -123,15 +123,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
 	}
 
+	createOrUpdateString := "created"
 	if exists {
-		logger.Info("service account request needs to be updated")
-
-		return c.reconcileUpdate(ctx, &sare)
+		createOrUpdateString = "updated"
 	}
+	logger.Info("service account request needs to be " + createOrUpdateString)
 
-	logger.Info("service account request needs to be created")
-
-	return c.reconcileCreate(ctx, &sare)
+	return c.reconcileCreateOrUpdate(ctx, &sare)
 }
 
 // TODO: When an optional service account is created only after the consumer has
@@ -142,13 +140,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 //
 // See cloudogu/service-account-operator#8
 
-func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
+func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// TODO: deleting the secret will only work once Create and Update have been joined together.
 			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
 			deleteErr := c.secretManager.Delete(ctx, sare)
 			if deleteErr != nil {
@@ -171,9 +168,14 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), sare.Spec.Params)
+	// TODO determine the best way for the behavior params to come into existence
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, producer.BehaviorParams{})
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err))
+	}
+
+	if credentials == nil {
+		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
 	}
 
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
@@ -182,7 +184,7 @@ func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2
 	}
 
 	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
 	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
@@ -294,50 +296,6 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 	return nil
 }
 
-func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-
-	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if sare.Spec.Optional {
-				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
-			}
-
-			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
-		}
-
-		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
-	}
-
-	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
-	}
-
-	// TODO determine the best way for the behavior params to come into existence
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, producer.BehaviorParams{})
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to update service account at producer %q: %w", sapr.Name, err))
-	}
-
-	if credentials == nil {
-		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
-	}
-
-	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
-	}
-
-	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful update for %q: %w", sare.Name, err)
-	}
-
-	return ctrl.Result{}, nil
-}
-
 func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv2.ServiceAccountProducer, error) {
 	var sapr serviceaccountv2.ServiceAccountProducer
 	if err := c.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: producerName}, &sapr); err != nil {
@@ -348,7 +306,6 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 }
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
-	// TODO check jelemux' predicate logic and remove this todo
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&serviceaccountv2.ServiceAccountRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.Secret{}, builder.WithPredicates(wasDeletedPredicate())).

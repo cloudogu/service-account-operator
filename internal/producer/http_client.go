@@ -42,11 +42,6 @@ type BehaviorParams struct {
 
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
-	// Create provisions a new service account and returns its credentials.
-	// TODO Delete Create after merging Jelemux'/Niklas' deletion code
-	// Deprecated: use CreateOrUpdate instead
-	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
-	// CreateOrUpdate creates a service account or re-provisions (aka rotating) an existing service account and returns the refreshed credentials. The credential map may be nil if no change occurred.
 	CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
@@ -118,50 +113,9 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	}
 }
 
-// TODO Delete after merging but check changes to Create beforehand with CreateOrUpdate
-
-// Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
-// Deprecated: use CreateOrUpdate instead
-func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	body, err := json.Marshal(createOrUpdateRequestBody{Consumer: consumer, Params: params})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(apiKeyHeader, c.apiKey)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP create-serviceaccount request to producer %q failed: %w", c.endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("producer %q rejected the request with 401; please check the API key in the auth secret", c.endpoint)
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("producer returned unexpected status %s for %q: %s", resp.Status, c.endpoint, string(respBody))
-	}
-
-	var credentials map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&credentials); err != nil {
-		return nil, fmt.Errorf("failed to decode producer response: %w", err)
-	}
-
-	return credentials, nil
-}
-
 // CreateOrUpdate calls a service account producer's API to idempotently modify a service account for the given consumer
 // and returns the credentials. The credential map may be nil if no change occurred.
 func (c *HttpClient) CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error) {
-	// use a pointer to behaviorParams so the json marshaller will properly omit it
 	bodyObject := createOrUpdateRequestBody{Consumer: consumer, Params: params, BehaviorParams: behaviorParams}
 	body, err := json.Marshal(bodyObject)
 	if err != nil {
