@@ -1051,39 +1051,61 @@ func Test_wasDeletedPredicate(t *testing.T) {
 
 func Test_producerGotReadyPredicate(t *testing.T) {
 	sut := producerGotReadyPredicate()
-	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
-		ObjectOld: &corev1.Pod{},
-	}))
-	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
-		ObjectOld: &serviceaccountv2.ServiceAccountProducer{},
-		ObjectNew: &corev1.Pod{},
-	}))
-	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{
-		ObjectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
-			Conditions: []metav1.Condition{{
-				Type:   serviceaccountv2.ConditionTypeReady,
-				Status: metav1.ConditionTrue,
+	tests := []struct {
+		name                 string
+		objectOld, objectNew client.Object
+		want                 bool
+	}{
+		{
+			name:      "should be false if old object has wrong type",
+			objectOld: &corev1.Pod{},
+			want:      false,
+		},
+		{
+			name:      "should be false if new object has wrong type",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{},
+			objectNew: &corev1.Pod{},
+			want:      false,
+		},
+		{
+			name: "should be false if ready condition changes from true to false",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
 			}},
-		}},
-		ObjectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
-			Conditions: []metav1.Condition{{
-				Type:   serviceaccountv2.ConditionTypeReady,
-				Status: metav1.ConditionFalse,
+			objectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionFalse,
+				}},
 			}},
-		}},
-	}))
-	assert.True(t, sut.Update(event.TypedUpdateEvent[client.Object]{
-		ObjectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
-			Conditions: []metav1.Condition{{
-				Type:   serviceaccountv2.ConditionTypeReady,
-				Status: metav1.ConditionFalse,
+			want: false,
+		},
+		{
+			name: "should be true if ready condition changes from false to true",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionFalse,
+				}},
 			}},
-		}},
-		ObjectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
-			Conditions: []metav1.Condition{{
-				Type:   serviceaccountv2.ConditionTypeReady,
-				Status: metav1.ConditionTrue,
+			objectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
 			}},
-		}},
-	}))
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sut.Update(event.TypedUpdateEvent[client.Object]{
+				ObjectOld: tt.objectOld,
+				ObjectNew: tt.objectNew,
+			}))
+		})
+	}
 }
