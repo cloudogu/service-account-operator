@@ -34,6 +34,7 @@ type OperatorConfig struct {
 	ControllerOptions ctrl.Options
 
 	// DeletionTimeout is the time to wait for a resource to be deleted before giving up.
+	// The default value is supplied by the values.yaml.
 	DeletionTimeout time.Duration
 }
 
@@ -61,8 +62,6 @@ func NewOperatorConfig(scheme *runtime.Scheme) (*OperatorConfig, error) {
 	}, nil
 }
 
-// getDeletionTimeout parses the deletion timeout from the environment variable
-// the default is supplied by the values.yaml
 func getDeletionTimeout() (time.Duration, error) {
 	deletionTimeout, err := getEnvVar(deletionTimeoutEnvVar)
 	if err != nil {
