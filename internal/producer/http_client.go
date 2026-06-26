@@ -25,10 +25,11 @@ type Params map[string]string
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
 	// Create provisions a new service account and returns its credentials.
+	// TODO Delete Create after merging Jelemux'/Niklas' deletion code
+	// Deprecated: use CreateOrUpdate instead
 	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
-	// Update re-provisions an existing service account and returns the refreshed credentials. The credential map may
-	// be nil if no change occurred.
-	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
+	// CreateOrUpdate creates a service account or re-provisions (aka rotating) an existing service account and returns the refreshed credentials. The credential map may be nil if no change occurred.
+	CreateOrUpdate(ctx context.Context, consumer string, params Params) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
 	// Ready returns nil when the producer endpoint is reachable
@@ -62,15 +63,18 @@ type updateRequestBody struct {
 	createRequestBody
 }
 
+// Exists checks if any Service Account exists for the consumer and returns true if the Producer API indicates so.
 func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
 		return false, fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
@@ -95,7 +99,10 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	}
 }
 
+// TODO Delete after merging but check changes to Create beforehand with CreateOrUpdate
+
 // Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
+// Deprecated: use CreateOrUpdate instead
 func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
 	if err != nil {
@@ -132,9 +139,9 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 	return credentials, nil
 }
 
-// Update calls a service account producer's API to idempotently modify a service account for the given consumer and
+// CreateOrUpdate calls a service account producer's API to idempotently modify a service account for the given consumer and
 // returns the credentials. The credential map may be nil if no change occurred.
-func (c *HttpClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
+func (c *HttpClient) CreateOrUpdate(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	bodyObj := updateRequestBody{createRequestBody{Consumer: consumer, Params: params}}
 	body, err := json.Marshal(bodyObj)
 	if err != nil {
@@ -150,7 +157,7 @@ func (c *HttpClient) Update(ctx context.Context, consumer string, params Params)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("update-serviceaccount (HTTP) request to producer %q failed: %w", c.endpoint, err)
+		return nil, fmt.Errorf("http serviceaccount request to producer %q failed: %w", c.endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

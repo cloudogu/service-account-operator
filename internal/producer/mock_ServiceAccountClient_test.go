@@ -232,7 +232,7 @@ func (_c *MockServiceAccountClient_Ready_Call) RunAndReturn(run func(context.Con
 }
 
 // Update provides a mock function with given fields: ctx, consumer, params
-func (_m *MockServiceAccountClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
+func (_m *MockServiceAccountClient) CreateOrUpdate(ctx context.Context, consumer string, params Params) (map[string]string, error) {
 	ret := _m.Called(ctx, consumer, params)
 
 	if len(ret) == 0 {

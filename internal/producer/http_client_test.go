@@ -14,6 +14,8 @@ import (
 
 var testCtx = context.Background()
 
+// TODO: Delete test but check for updated tests before doing so, so these updated tests can move to createOrUpdate tests
+
 func TestHTTPClient_Create(t *testing.T) {
 	t.Run("should send POST with consumer and params in body and return credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +120,7 @@ func TestHTTPClient_Create(t *testing.T) {
 	})
 }
 
-func TestHTTPClient_Update(t *testing.T) {
+func TestHTTPClient_CreateOrUpdate(t *testing.T) {
 	t.Run("should send PUT with consumer and params in body and return credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodPut, r.Method)
@@ -139,7 +141,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.Update(testCtx, "grafana", Params{"verbose": "true"})
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"})
 
 		require.NoError(t, err)
 		assert.Equal(t, "grafana-user", creds["username"])
@@ -166,7 +168,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.Update(testCtx, "grafana", Params{"verbose": "true"})
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"})
 
 		require.NoError(t, err)
 		assert.Nil(t, creds)
@@ -185,7 +187,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		creds, err := client.Update(testCtx, "consumer", nil)
+		creds, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "abc", creds["apiKey"])
@@ -198,7 +200,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Update(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "producer returned unexpected status 400")
@@ -211,7 +213,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "wrong-key")
-		_, err := client.Update(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "rejected the request with 401; please check the API key in the SARE auth secret")
@@ -219,7 +221,7 @@ func TestHTTPClient_Update(t *testing.T) {
 
 	t.Run("should return error when server is unreachable", func(t *testing.T) {
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		_, err := client.Update(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "update-serviceaccount (HTTP) request to producer \"http://127.0.0.1:1\" failed:")
@@ -227,7 +229,7 @@ func TestHTTPClient_Update(t *testing.T) {
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		_, err := client.Update(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to create HTTP put request: parse \"://invalid\": missing protocol scheme")
@@ -241,7 +243,7 @@ func TestHTTPClient_Update(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Update(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode producer response")

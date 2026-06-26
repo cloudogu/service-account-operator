@@ -290,7 +290,7 @@ func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
 
-	credentials, err := saClient.Update(ctx, qualifiedConsumer(sare), sare.Spec.Params)
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to update service account at producer %q: %w", sapr.Name, err))
 	}
@@ -321,6 +321,7 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 }
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
+	// TODO check jelemux' predicate logic and remove this todo
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&serviceaccountv2.ServiceAccountRequest{}).
 		Watches(
