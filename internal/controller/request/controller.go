@@ -117,11 +117,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return c.reconcileCreate(ctx, &sare)
 }
 
-// TODO(open question): When an optional service account is created only after the consumer has
+// TODO: When an optional service account is created only after the consumer has
 // already started (the consumer came up without it), the consumer may not pick up the new
 // credentials until it is restarted. Decide whether this operator should trigger a consumer
 // restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
 // reload credentials on its own. Pending product decision before implementing.
+//
+// See cloudogu/service-account-operator#8
 
 func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
