@@ -55,7 +55,8 @@ type serviceAccountClient interface { //nolint:unused
 	producer.ServiceAccountClient
 }
 
-type StatusClient interface {
+//nolint:unused
+type statusClient interface {
 	client.SubResourceWriter
 }
 

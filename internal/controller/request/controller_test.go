@@ -1000,7 +1000,7 @@ func expectClientEmptyFinalizerSare(t *testing.T, c *mockK8sClient, err error) {
 }
 
 func expectClientErrorStatusSare(t *testing.T, c *mockK8sClient, expectedError string) {
-	statusClient := NewMockStatusClient(t)
+	statusClient := newMockStatusClient(t)
 	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountRequest{}), mock.Anything).
 		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
 			data, patchErr := patch.Data(obj)
@@ -1012,7 +1012,7 @@ func expectClientErrorStatusSare(t *testing.T, c *mockK8sClient, expectedError s
 }
 
 func expectClientPatchStatus(t *testing.T, c *mockK8sClient, err error) {
-	statusClient := NewMockStatusClient(t)
+	statusClient := newMockStatusClient(t)
 	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountProducer{}), mock.Anything).
 		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
 			if err == nil {
