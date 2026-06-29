@@ -22,66 +22,6 @@ func (_m *mockServiceAccountClient) EXPECT() *mockServiceAccountClient_Expecter 
 	return &mockServiceAccountClient_Expecter{mock: &_m.Mock}
 }
 
-// Create provides a mock function with given fields: ctx, consumer, params
-func (_m *mockServiceAccountClient) Create(ctx context.Context, consumer string, params producer.Params) (map[string]string, error) {
-	ret := _m.Called(ctx, consumer, params)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Create")
-	}
-
-	var r0 map[string]string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, producer.Params) (map[string]string, error)); ok {
-		return rf(ctx, consumer, params)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, producer.Params) map[string]string); ok {
-		r0 = rf(ctx, consumer, params)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, producer.Params) error); ok {
-		r1 = rf(ctx, consumer, params)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// mockServiceAccountClient_Create_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Create'
-type mockServiceAccountClient_Create_Call struct {
-	*mock.Call
-}
-
-// Create is a helper method to define mock.On call
-//   - ctx context.Context
-//   - consumer string
-//   - params producer.Params
-func (_e *mockServiceAccountClient_Expecter) Create(ctx interface{}, consumer interface{}, params interface{}) *mockServiceAccountClient_Create_Call {
-	return &mockServiceAccountClient_Create_Call{Call: _e.mock.On("Create", ctx, consumer, params)}
-}
-
-func (_c *mockServiceAccountClient_Create_Call) Run(run func(ctx context.Context, consumer string, params producer.Params)) *mockServiceAccountClient_Create_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(producer.Params))
-	})
-	return _c
-}
-
-func (_c *mockServiceAccountClient_Create_Call) Return(_a0 map[string]string, _a1 error) *mockServiceAccountClient_Create_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *mockServiceAccountClient_Create_Call) RunAndReturn(run func(context.Context, string, producer.Params) (map[string]string, error)) *mockServiceAccountClient_Create_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreateOrUpdate provides a mock function with given fields: ctx, consumer, params, behaviorParams
 func (_m *mockServiceAccountClient) CreateOrUpdate(ctx context.Context, consumer string, params producer.Params, behaviorParams producer.BehaviorParams) (map[string]string, error) {
 	ret := _m.Called(ctx, consumer, params, behaviorParams)
