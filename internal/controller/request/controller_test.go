@@ -1113,3 +1113,9 @@ func Test_producerGotReadyPredicate(t *testing.T) {
 		})
 	}
 }
+
+func Test_namespacedName_returnsCompoundName(t *testing.T) {
+	actual := namespacedName(&testSare)
+
+	assert.Equal(t, "grafana-to-prometheus-ecosystem", actual)
+}
