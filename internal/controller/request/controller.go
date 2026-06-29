@@ -146,6 +146,15 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
+	if sare.Spec.Rotation.Enabled {
+		err := c.setSaRotationWatcher(ctx, sare)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to replace service account rotation expression: %w", err)
+		}
+	} else {
+		c.deleteSaRotationWatcher(sare)
+	}
+
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -170,6 +179,7 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
+	// check secret: if it doesn't exist, BehaviorParams must not be "Dont do anything"
 
 	// TODO determine the best way for the behavior params to come into existence
 	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, producer.BehaviorParams{})
@@ -215,11 +225,7 @@ func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAcc
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
-	consumer := qualifiedConsumer(sare)
-	if cronWatcher, ok := c.rotateCronWatcher[consumer]; ok {
-		cronWatcher.Stop()
-		delete(c.rotateCronWatcher, consumer)
-	}
+	c.deleteSaRotationWatcher(sare)
 
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
@@ -236,6 +242,43 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2
 	}
 
 	return c.removeFinalizer(ctx, sare)
+}
+
+func (c *Controller) deleteSaRotationWatcher(sare *serviceaccountv2.ServiceAccountRequest) {
+	sareName := namespacedName(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
+		cronWatcher.Stop()
+		delete(c.rotateCronWatcher, sareName)
+	}
+}
+
+func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (err error) {
+	sareName := namespacedName(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
+		cronWatcher.Stop()
+	}
+
+	// deleteSaSecretFunc relies on deleting the secret to a consumer because we watch the secret for deletion.
+	// if the deletion is detected, an update to the SA is issued against the producer.
+	deleteSaSecretFunc := func(ctx context.Context) (int, error) {
+		err := c.secretManager.Delete(ctx, sare)
+		if err != nil {
+			// TODO write an integration test to check if gronx cron tasker uses the int for application exitting
+			return 1, fmt.Errorf("failed to delete service account secret %q for service account rotation: %w", sare.Name, err)
+		}
+
+		return 0, nil
+	}
+
+	cronWatcher, err := cron.New(ctx, sare.Spec.Rotation.Rotation, deleteSaSecretFunc)
+	if err != nil {
+		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
+	}
+
+	cronWatcher.Run()
+	c.rotateCronWatcher[sareName] = cronWatcher
+
+	return nil
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
@@ -392,4 +435,12 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 // For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
 func qualifiedConsumer(sare *serviceaccountv2.ServiceAccountRequest) string {
 	return sare.Spec.Consumer + "-" + sare.Namespace
+}
+
+// namespacedName returns a namespace-qualified SARE name to ensure uniqueness across namespaces. The resource name's
+// uniqueness is itself enforced by Helm, so overwriting other consumer's SAREs are avoided this way.
+//
+// For example, a consumer "grafana-prometheus-sa" in namespace "ecosystem" becomes "grafana-prometheus-sa-ecosystem".
+func namespacedName(sare *serviceaccountv2.ServiceAccountRequest) string {
+	return sare.Name + "-" + sare.Namespace
 }
