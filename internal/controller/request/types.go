@@ -46,3 +46,11 @@ type taskRunnerFactory interface {
 	// New creates a new instance of a
 	New(ctx context.Context, expr string, jobClosure cron.JobFunc) (cron.TaskRunner, error)
 }
+
+//nolint:unused
+type taskRunner interface {
+	// Run runs the provided task
+	Run()
+	// Stop interrupts the provided task.
+	Stop()
+}

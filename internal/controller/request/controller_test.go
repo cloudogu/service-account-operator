@@ -9,6 +9,7 @@ import (
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/cloudogu/service-account-operator/internal/config"
+	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,7 @@ import (
 var (
 	testCtx        = context.Background()
 	testSecretName = "grafana-prom-sa"
+	testCron02am   = "0 2 * * *"
 )
 
 var testSare = serviceaccountv2.ServiceAccountRequest{
@@ -40,7 +42,7 @@ var testSare = serviceaccountv2.ServiceAccountRequest{
 		Consumer:     "grafana",
 		ConsumerType: serviceaccountv2.DoguConsumerType,
 		Producer:     "prometheus",
-		Rotation:     &serviceaccountv2.ServiceAccountRotation{},
+		Rotation:     &serviceaccountv2.ServiceAccountRotation{Enabled: false, Rotation: testCron02am},
 	},
 }
 
@@ -662,20 +664,51 @@ func TestController_deleteSaRotationWatcher(t *testing.T) {
 func TestController_setSaRotationWatcher(t *testing.T) {
 	t.Run("should add consumer to watcher on new creation", func(t *testing.T) {
 		// given
+		taskRunnerMock := newMockTaskRunner(t)
+		taskRunnerMock.EXPECT().Run()
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(taskRunnerMock, nil)
+
+		sare := &testSare
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
 
 		// when
+		sare.Spec.Rotation.Enabled = true
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
 
 		// then
-		assert.Fail(t, "implement me")
+		require.NoError(t, err)
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
 	})
 
 	t.Run("should replace consumer in watcher on update", func(t *testing.T) {
 		// given
+		newTaskRunnerMock := newMockTaskRunner(t)
+		newTaskRunnerMock.EXPECT().Run()
+		oldTaskRunnerMock := newMockTaskRunner(t)
+		oldTaskRunnerMock.EXPECT().Stop()
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(newTaskRunnerMock, nil)
+
+		sare := &testSare
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
 
 		// when
+		sare.Spec.Rotation.Enabled = true
+		sut.rotateCronWatcher[consumerName] = oldTaskRunnerMock
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
 
 		// then
-		assert.Fail(t, "implement me")
+		require.NoError(t, err)
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
 	})
 }
 
