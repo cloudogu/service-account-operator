@@ -24,20 +24,15 @@ const (
 // producers requirements.
 type Params map[string]string
 
-const (
-	RotateSaNotNow BehaviorParamsRotation = iota
-	RotateSaImmediately
-)
-
 // BehaviorParamsRotation indicates ways of how a Service Account's credential should be rotated.
 type BehaviorParamsRotation int
 
 // BehaviorParams may be used to by a consumer (via their SARE) to trigger actions towards the Service Account producer.
 type BehaviorParams struct {
-	// RotateServiceAccount indicates if a Service Account's credential should be rotated. This field must be ignored
-	// during the first creation of a Service Account (because there is nothing to rotate).
-	// This field is optional and defaults to [RotateSaNotNow].
-	RotateServiceAccount BehaviorParamsRotation `json:"rotateServiceAccount,omitempty"`
+	// RotateServiceAccountNow indicates if a Service Account's credential should be rotated immediately.
+	// This field must be ignored during the first creation of a Service Account (because there is nothing to rotate).
+	// This field is optional and defaults to false.
+	RotateServiceAccountNow bool `json:"rotateServiceAccountNow,omitempty"`
 }
 
 // ServiceAccountClient manages service accounts on a specific producer.

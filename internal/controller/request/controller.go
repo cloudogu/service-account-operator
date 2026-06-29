@@ -35,7 +35,7 @@ const (
 
 // secretManager manages the Kubernetes Secret that holds a service account's credentials.
 type secretManager interface {
-	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error)
+	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (exists bool, secretName string, err error)
 	CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error)
 	Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error
 }
@@ -115,23 +115,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
 	}
 
-	exists, err := c.secretManager.Exists(ctx, &sare)
-	if err != nil {
-		if errors.Is(err, sa.ErrSecretConflict) {
-			return ctrl.Result{}, c.fail(ctx, &sare, err)
-		}
-
-		logger.Error(err, "failed to check if service account secret exists")
-
-		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
-	}
-
-	createOrUpdateString := "created"
-	if exists {
-		createOrUpdateString = "updated"
-	}
-	logger.Info("service account request needs to be " + createOrUpdateString)
-
 	return c.reconcileCreateOrUpdate(ctx, &sare)
 }
 
@@ -145,6 +128,23 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+
+	secretExists, secretName, err := c.secretManager.Exists(ctx, sare)
+	if err != nil {
+		if errors.Is(err, sa.ErrSecretConflict) {
+			return ctrl.Result{}, c.fail(ctx, sare, err)
+		}
+
+		logger.Error(err, "failed to check if service account secret exists")
+
+		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
+	}
+
+	createOrUpdateString := "created"
+	if secretExists {
+		createOrUpdateString = "updated"
+	}
+	logger.Info("service account request needs to be " + createOrUpdateString)
 
 	if sare.Spec.Rotation.Enabled {
 		err := c.setSaRotationWatcher(ctx, sare)
@@ -179,21 +179,24 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
 	}
-	// check secret: if it doesn't exist, BehaviorParams must not be "Dont do anything"
 
-	// TODO determine the best way for the behavior params to come into existence
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, producer.BehaviorParams{})
+	behaviorParams := producer.BehaviorParams{}
+	if !secretExists {
+		behaviorParams.RotateServiceAccountNow = true
+	}
+
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err))
 	}
 
 	if credentials == nil {
 		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
-	}
-
-	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+	} else {
+		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+		if err != nil {
+			return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+		}
 	}
 
 	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
