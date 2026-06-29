@@ -266,7 +266,7 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 	deleteSaSecretFunc := func(ctx context.Context) (int, error) {
 		err := c.secretManager.Delete(ctx, sare)
 		if err != nil {
-			// TODO write an integration test to check if gronx cron tasker uses the int for application exitting
+			// currently, the gronx tasker uses the return code for debugging the gronx task.
 			return 1, fmt.Errorf("failed to delete service account secret %q for service account rotation: %w", sare.Name, err)
 		}
 
