@@ -586,20 +586,81 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
 	t.Run("should successful set rotation watcher if rotation is enabled", func(t *testing.T) {
-		// given
+		scheme := newTestScheme(t)
+		sare := testSare
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Rotation.Enabled = true
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&sare, new(testSapr)).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
 
-		// when
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 
-		// then
-		assert.Fail(t, "implement me")
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"username": "grafana-user", "password": "pass"}).Return("grafana-to-prometheus", nil)
+
+		taskMock := newMockTaskRunner(t)
+		taskMock.EXPECT().Run().Return()
+		cronFactoryMock := newMockTaskRunnerFactory(t)
+		cronFactoryMock.EXPECT().New(testCtx, "0 2 * * *", mock.Anything).Return(taskMock, nil)
+
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller := New(rtClient, scheme, testOperatorConfig, recorder)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = cronFactoryMock
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
+
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
 	t.Run("should error on setting rotation watcher if cron syntax is invalid", func(t *testing.T) {
-		// given
+		scheme := newTestScheme(t)
+		sare := testSare
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Rotation.Enabled = true
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&sare, new(testSapr)).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
 
-		// when
+		factoryMock := newMockProducerClientFactory(t)
 
-		// then
-		assert.Fail(t, "implement me")
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
+
+		cronFactoryMock := newMockTaskRunnerFactory(t)
+		cronFactoryMock.EXPECT().New(testCtx, "0 2 * * *", mock.Anything).Return(nil, assert.AnError)
+
+		recorder := newFakeRecorder(t, nil)
+		controller := New(rtClient, scheme, testOperatorConfig, recorder)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = cronFactoryMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to replace service account rotation expression")
+		assert.ErrorContains(t, err, "failed to set cron watcher for SARE \"grafana-to-prometheus-ecosystem\"")
 	})
 
 	t.Run("should not update secret if the credentials did not change", func(t *testing.T) {
