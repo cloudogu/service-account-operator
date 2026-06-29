@@ -643,22 +643,40 @@ func TestController_Reconcile(t *testing.T) {
 }
 
 func TestController_deleteSaRotationWatcher(t *testing.T) {
-	t.Run("should return just fine if watcher does not contain consumer", func(t *testing.T) {
+	t.Run("should delete nothing if the watcher does not contain consumer", func(t *testing.T) {
 		// given
+		sare := &testSare
+		consumerName := namespacedName(sare)
+
+		sut := Controller{rotateCronWatcher: make(map[string]cron.TaskRunner)}
 
 		// when
+		sare.Spec.Rotation.Enabled = true
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		sut.deleteSaRotationWatcher(sare)
 
 		// then
-		assert.Fail(t, "implement me")
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
 	})
 
 	t.Run("should remove consumer from watcher map", func(t *testing.T) {
 		// given
+		taskRunnerMock := newMockTaskRunner(t)
+		taskRunnerMock.EXPECT().Stop()
+		sare := &testSare
+		sare.Spec.Rotation.Enabled = true
+		consumerName := namespacedName(sare)
+
+		sut := Controller{rotateCronWatcher: make(map[string]cron.TaskRunner)}
+		sut.rotateCronWatcher[consumerName] = taskRunnerMock
 
 		// when
+		require.Equal(t, taskRunnerMock, sut.rotateCronWatcher[consumerName])
+		sut.deleteSaRotationWatcher(sare)
 
 		// then
-		assert.Fail(t, "implement me")
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
 	})
 }
 func TestController_setSaRotationWatcher(t *testing.T) {
