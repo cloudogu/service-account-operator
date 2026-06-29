@@ -628,6 +628,70 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
+	t.Run("should successful set rotation watcher if rotation is enabled", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+	t.Run("should error on setting rotation watcher if cron syntax is invalid", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+
+	t.Run("should log update event with SARE params but the credentials did not change", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+}
+
+func TestController_deleteSaRotationWatcher(t *testing.T) {
+	t.Run("should return just fine if watcher does not contain consumer", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+
+	t.Run("should remove consumer from watcher map", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+}
+func TestController_setSaRotationWatcher(t *testing.T) {
+	t.Run("should add consumer to watcher on new creation", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
+
+	t.Run("should replace consumer in watcher on update", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
 }
 
 func TestController_EnqueueRequestsForProducer(t *testing.T) {
@@ -1118,4 +1182,15 @@ func Test_namespacedName_returnsCompoundName(t *testing.T) {
 	actual := namespacedName(&testSare)
 
 	assert.Equal(t, "grafana-to-prometheus-ecosystem", actual)
+}
+
+func TestController_removeFinalizer(t *testing.T) {
+	t.Run("should return when finalizer is already removed", func(t *testing.T) {
+		// given
+
+		// when
+
+		// then
+		assert.Fail(t, "implement me")
+	})
 }

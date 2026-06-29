@@ -203,6 +203,8 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
+	// TODO sort out event for create or updated
+	// also if the watcher deleted the secret the update would also look like a creation which is not really the same thing
 	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
 
 	return ctrl.Result{}, nil
