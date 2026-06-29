@@ -256,6 +256,14 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
 	}
 
+	startTaskRunnerWithMemoryLeakPrevention(ctx, cronWatcher)
+
+	c.rotateCronWatcher[sareName] = cronWatcher
+
+	return nil
+}
+
+func startTaskRunnerWithMemoryLeakPrevention(ctx context.Context, cronWatcher cron.TaskRunner) {
 	go func() {
 		cronWatcher.Run()
 	}()
@@ -266,9 +274,6 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		case <-cronWatcher.Stopped():
 		}
 	}()
-	c.rotateCronWatcher[sareName] = cronWatcher
-
-	return nil
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {

@@ -589,7 +589,7 @@ func TestController_Reconcile(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
-		sare.Spec.Rotation = &serviceaccountv2.ServiceAccountRotation{Enabled: true, Rotation: "0 2 * * *"}
+		sare.Spec.Rotation = &serviceaccountv2.ServiceAccountRotation{Enabled: true, Rotation: testCron02am}
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, new(testSapr)).
@@ -607,8 +607,10 @@ func TestController_Reconcile(t *testing.T) {
 
 		taskMock := newMockTaskRunner(t)
 		taskMock.EXPECT().Run().Return()
+		stopped := make(chan struct{})
+		taskMock.EXPECT().Stopped().Return(stopped)
 		cronFactoryMock := newMockTaskRunnerFactory(t)
-		cronFactoryMock.EXPECT().New(testCtx, "0 2 * * *", mock.Anything).Return(taskMock, nil)
+		cronFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(taskMock, nil)
 
 		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
@@ -685,6 +687,7 @@ func TestController_Reconcile(t *testing.T) {
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = newMockTaskRunnerFactory(t)
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -745,6 +748,8 @@ func TestController_setSaRotationWatcher(t *testing.T) {
 		// given
 		taskRunnerMock := newMockTaskRunner(t)
 		taskRunnerMock.EXPECT().Run()
+		stopped := make(chan struct{})
+		taskRunnerMock.EXPECT().Stopped().Return(stopped)
 		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
 		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(taskRunnerMock, nil)
 
@@ -768,8 +773,10 @@ func TestController_setSaRotationWatcher(t *testing.T) {
 		// given
 		newTaskRunnerMock := newMockTaskRunner(t)
 		newTaskRunnerMock.EXPECT().Run()
+		newTaskRunnerMock.EXPECT().Stopped().Return(make(chan struct{}))
 		oldTaskRunnerMock := newMockTaskRunner(t)
 		oldTaskRunnerMock.EXPECT().Stop()
+		oldTaskRunnerMock.EXPECT().Stopped().Return(make(chan struct{}))
 		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
 		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(newTaskRunnerMock, nil)
 
