@@ -13,7 +13,6 @@ import (
 	"github.com/cloudogu/service-account-operator/internal/config"
 	"github.com/cloudogu/service-account-operator/internal/controller/producer"
 	"github.com/cloudogu/service-account-operator/internal/controller/request"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure the manager can use them when loading kubeconfig entries.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"

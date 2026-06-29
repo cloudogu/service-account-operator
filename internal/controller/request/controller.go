@@ -8,6 +8,7 @@ import (
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/cloudogu/service-account-operator/internal/config"
+	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	corev1 "k8s.io/api/core/v1"
@@ -71,6 +72,7 @@ type Controller struct {
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
 	eventRecorder         eventRecorder
+	rotateCronWatcher     map[string]*cron.Task
 }
 
 func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) *Controller {
@@ -80,6 +82,7 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
 		eventRecorder:         eventRecorder,
+		rotateCronWatcher:     make(map[string]*cron.Task),
 	}
 }
 
@@ -212,6 +215,12 @@ func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAcc
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	consumer := qualifiedConsumer(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[consumer]; ok {
+		cronWatcher.Stop()
+		delete(c.rotateCronWatcher, consumer)
+	}
+
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}

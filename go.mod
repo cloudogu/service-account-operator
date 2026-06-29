@@ -3,6 +3,7 @@ module github.com/cloudogu/service-account-operator
 go 1.26.0
 
 require (
+	github.com/adhocore/gronx v1.20.0
 	github.com/cloudogu/k8s-serviceaccount-lib/v2 v2.0.1
 	github.com/go-logr/logr v1.4.3
 	github.com/stretchr/testify v1.11.1
