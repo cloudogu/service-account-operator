@@ -589,7 +589,7 @@ func TestController_Reconcile(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
-		sare.Spec.Rotation.Enabled = true
+		sare.Spec.Rotation = &serviceaccountv2.ServiceAccountRotation{Enabled: true, Rotation: "0 2 * * *"}
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, new(testSapr)).
@@ -635,7 +635,7 @@ func TestController_Reconcile(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
 		sare.Finalizers = []string{finalizer}
-		sare.Spec.Rotation.Enabled = true
+		sare.Spec.Rotation = &serviceaccountv2.ServiceAccountRotation{Enabled: true, Rotation: "0 2 * * *"}
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(&sare, new(testSapr)).
