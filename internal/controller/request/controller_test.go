@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
@@ -69,17 +68,6 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 
 func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
-}
-
-func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
-	t.Helper()
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-	}
-	if err := controllerutil.SetControllerReference(owner, secret, scheme); err != nil {
-		t.Fatalf("SetControllerReference() error: %v", err)
-	}
-	return secret
 }
 
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
@@ -897,7 +885,7 @@ func TestController_reconcileDelete(t *testing.T) {
 				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
 					sClient := newMockK8sClient(t)
 					expectClientGetProducer(sClient, nil, assert.AnError)
-					expectClientErrorStatusSare(t, sClient, "failed to get producer \"prometheus\"")
+					expectClientErrorStatusSare(t, sClient)
 					return sClient, nil
 				},
 			},
@@ -915,7 +903,7 @@ func TestController_reconcileDelete(t *testing.T) {
 					sClient := newMockK8sClient(t)
 					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
 					expectClientGetProducer(sClient, testSapr, nil)
-					expectClientErrorStatusSare(t, sClient, "failed to build service account client for producer \"prometheus\"")
+					expectClientErrorStatusSare(t, sClient)
 					return sClient, testSapr
 				},
 				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
@@ -936,7 +924,7 @@ func TestController_reconcileDelete(t *testing.T) {
 					sClient := newMockK8sClient(t)
 					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
 					expectClientGetProducer(sClient, testSapr, nil)
-					expectClientErrorStatusSare(t, sClient, "failed to check if service account \"grafana\" exists at producer \"prometheus\"")
+					expectClientErrorStatusSare(t, sClient)
 					return sClient, testSapr
 				},
 				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
@@ -978,7 +966,7 @@ func TestController_reconcileDelete(t *testing.T) {
 					sClient := newMockK8sClient(t)
 					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
 					expectClientGetProducer(sClient, testSapr, nil)
-					expectClientErrorStatusSare(t, sClient, "failed to delete service account \"grafana\" at producer \"prometheus\":")
+					expectClientErrorStatusSare(t, sClient)
 
 					return sClient, testSapr
 				},
@@ -1064,7 +1052,7 @@ func expectClientEmptyFinalizerSare(t *testing.T, c *mockK8sClient, err error) {
 		}).Return(err)
 }
 
-func expectClientErrorStatusSare(t *testing.T, c *mockK8sClient, expectedError string) {
+func expectClientErrorStatusSare(t *testing.T, c *mockK8sClient) {
 	statusClient := newMockStatusClient(t)
 	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountRequest{}), mock.Anything).
 		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
