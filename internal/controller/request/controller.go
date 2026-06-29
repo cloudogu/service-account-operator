@@ -11,6 +11,8 @@ import (
 	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -172,15 +174,14 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		if err != nil {
 			return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
 		}
+
+		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
+		c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
 	}
 
 	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
-
-	// TODO sort out event for create or updated
-	// also if the watcher deleted the secret the update would also look like a creation which is not really the same thing
-	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountCreated", "Created service account %q", sare.Spec.Consumer)
 
 	return ctrl.Result{}, nil
 }

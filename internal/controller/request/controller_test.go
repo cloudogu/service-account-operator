@@ -465,7 +465,7 @@ func TestController_Reconcile(t *testing.T) {
 		secretMgrMock := newMockSecretManager(t)
 		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).Return("grafana-to-prometheus", nil)
-		recorder := newFakeRecorder(t, nil)
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
@@ -618,7 +618,7 @@ func TestController_Reconcile(t *testing.T) {
 		secretMgrMock := newMockSecretManager(t)
 		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, sare.Name, nil)
 
-		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		recorder := newFakeRecorder(t, nil)
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
