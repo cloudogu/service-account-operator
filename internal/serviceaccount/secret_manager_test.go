@@ -49,10 +49,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.False(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return true when target secret exists and is owned by the SARE", func(t *testing.T) {
@@ -62,10 +63,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return ErrSecretConflict when target secret exists but is not owned by this SARE", func(t *testing.T) {
@@ -77,10 +79,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.ErrorIs(t, err, ErrSecretConflict)
 		assert.False(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return error when client returns unexpected error", func(t *testing.T) {
@@ -100,7 +103,7 @@ func TestSecretManager_Exists(t *testing.T) {
 			Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.Exists(testCtx, sare)
+		_, _, err := sm.Exists(testCtx, sare)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to check for existing secret")
@@ -114,10 +117,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
+		assert.Equal(t, "custom-creds", secretName)
 	})
 }
 

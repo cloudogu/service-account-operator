@@ -30,7 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
-var testCtx = context.Background()
+var (
+	testCtx        = context.Background()
+	testSecretName = "grafana-prom-sa"
+)
 
 var testSare = serviceaccountv2.ServiceAccountRequest{
 	ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
@@ -38,6 +41,7 @@ var testSare = serviceaccountv2.ServiceAccountRequest{
 		Consumer:     "grafana",
 		ConsumerType: serviceaccountv2.DoguConsumerType,
 		Producer:     "prometheus",
+		Rotation:     &serviceaccountv2.ServiceAccountRotation{},
 	},
 }
 
@@ -243,7 +247,7 @@ func TestController_Reconcile(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, errors.New("storage error"))
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, errors.New("storage error"))
 		recorder := newFakeRecorder(t, nil)
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
 		controller.secretManager = secretMgrMock
@@ -266,7 +270,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 		secretMgrMock := newMockSecretManager(t)
 		conflictErr := fmt.Errorf("%w: secret %q in namespace %q", sa.ErrSecretConflict, "grafana-to-prometheus", "ecosystem")
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, conflictErr)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, conflictErr)
 		recorder := newFakeRecorder(t, nil)
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
 		controller.secretManager = secretMgrMock
@@ -361,7 +365,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).Return(nil, errors.New("connection refused"))
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, errors.New("connection refused"))
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 		recorder := newFakeRecorder(t, nil)
@@ -433,12 +437,12 @@ func TestController_Reconcile(t *testing.T) {
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).
 			Return("", errors.New("disk full"))
 		recorder := newFakeRecorder(t, nil)
@@ -499,12 +503,12 @@ func TestController_Reconcile(t *testing.T) {
 			}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).Return("grafana-to-prometheus", nil)
 		recorder := newFakeRecorder(t, nil)
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
@@ -568,12 +572,12 @@ func TestController_Reconcile(t *testing.T) {
 
 		httpClientMock := newMockServiceAccountClient(t)
 		httpClientMock.EXPECT().
-			Create(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}).
+			CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}, producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"apiKey": "abc"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"apiKey": "abc"}).Return("grafana-to-prometheus", nil)
 		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
 		controller := New(rtClient, scheme, testOperatorConfig, recorder)
@@ -596,12 +600,12 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, testSecretName, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"username": "grafana-user", "password": "pass"}).Return("grafana-to-prometheus", nil)
 
 		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})

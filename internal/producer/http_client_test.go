@@ -345,7 +345,7 @@ func TestBehaviorParams(t *testing.T) {
 		sut := createOrUpdateRequestBody{
 			Consumer:       "le-consumer",
 			Params:         map[string]string{"key": "value"},
-			BehaviorParams: BehaviorParams{RotateSaImmediately},
+			BehaviorParams: BehaviorParams{RotateServiceAccountNow: true},
 		}
 
 		// when
@@ -353,13 +353,13 @@ func TestBehaviorParams(t *testing.T) {
 
 		// then
 		require.NoError(t, err)
-		assert.Equal(t, `{"consumer":"le-consumer","params":{"key":"value"},"behaviorParams":{"rotateServiceAccount":1}}`, string(actual))
+		assert.Equal(t, `{"consumer":"le-consumer","params":{"key":"value"},"behaviorParams":{"rotateServiceAccountNow":true}}`, string(actual))
 	})
 	t.Run("should suppress rotation zero value", func(t *testing.T) {
 		// given
 		sut := createOrUpdateRequestBody{
 			Consumer:       "le-consumer",
-			BehaviorParams: BehaviorParams{RotateSaNotNow},
+			BehaviorParams: BehaviorParams{RotateServiceAccountNow: false},
 		}
 
 		// when
