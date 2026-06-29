@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,38 +32,6 @@ const (
 	finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
 )
 
-// secretManager manages the Kubernetes Secret that holds a service account's credentials.
-type secretManager interface {
-	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (exists bool, secretName string, err error)
-	CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error)
-	Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error
-}
-
-// producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
-// resolving the API key from the referenced Kubernetes Secret.
-type producerClientFactory interface {
-	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv2.ServiceAccountProducer) (producer.ServiceAccountClient, error)
-}
-
-type k8sClient interface {
-	client.Client
-}
-
-// serviceAccountClient manages service accounts on a specific producer.
-// Defined here for mock generation
-type serviceAccountClient interface { //nolint:unused
-	producer.ServiceAccountClient
-}
-
-//nolint:unused
-type statusClient interface {
-	client.SubResourceWriter
-}
-
-type eventRecorder interface {
-	events.EventRecorder
-}
-
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
 	client                k8sClient
@@ -72,7 +39,14 @@ type Controller struct {
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
 	eventRecorder         eventRecorder
-	rotateCronWatcher     map[string]*cron.Task
+	cronTaskFactory       taskRunnerFactory
+	rotateCronWatcher     map[string]cron.TaskRunner
+}
+
+type defaultCronTaskFactory struct{}
+
+func (d *defaultCronTaskFactory) New(ctx context.Context, expr string, jobClosure cron.JobFunc) (cron.TaskRunner, error) {
+	return cron.New(ctx, expr, jobClosure)
 }
 
 func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) *Controller {
@@ -82,7 +56,8 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
 		eventRecorder:         eventRecorder,
-		rotateCronWatcher:     make(map[string]*cron.Task),
+		cronTaskFactory:       new(defaultCronTaskFactory),
+		rotateCronWatcher:     make(map[string]cron.TaskRunner),
 	}
 }
 
@@ -275,7 +250,7 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		return 0, nil
 	}
 
-	cronWatcher, err := cron.New(ctx, sare.Spec.Rotation.Rotation, deleteSaSecretFunc)
+	cronWatcher, err := c.cronTaskFactory.New(ctx, sare.Spec.Rotation.Rotation, deleteSaSecretFunc)
 	if err != nil {
 		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
 	}
