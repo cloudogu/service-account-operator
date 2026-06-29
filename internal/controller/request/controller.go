@@ -256,7 +256,16 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
 	}
 
-	cronWatcher.Run()
+	go func() {
+		cronWatcher.Run()
+	}()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cronWatcher.Stop()
+		case <-cronWatcher.Stopped():
+		}
+	}()
 	c.rotateCronWatcher[sareName] = cronWatcher
 
 	return nil

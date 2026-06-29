@@ -14,6 +14,12 @@ type JobFunc func(ctx context.Context) (int, error)
 // TaskRunner allows executing functions in recurring points in time, depending on the system time. Considering
 // container restarts or pod kills, this behavior is more flexible than a regular time ticker.
 type TaskRunner interface {
+	TaskExecutor
+	// Stopped returns a channel that will be closed when the task is stopped.
+	Stopped() chan struct{}
+}
+
+type TaskExecutor interface {
 	// Run starts the provided task. No errors will be returned during the execution since this would end the main
 	// loop. Implementors should either provide an error channel to the task function or simply log errors to
 	// indicate error situations.
@@ -23,7 +29,8 @@ type TaskRunner interface {
 }
 
 type defaultTaskRunner struct {
-	taskExecuter TaskRunner
+	taskExecuter TaskExecutor
+	stopChan     chan struct{}
 }
 
 // New creates a new instance for executing the same task. The task must be provided to its Run() function.
@@ -38,6 +45,7 @@ func New(ctx context.Context, expr string, jobClosure JobFunc) (TaskRunner, erro
 
 	return &defaultTaskRunner{
 		taskExecuter: taskManager.Task(expr, tasker.TaskFunc(jobClosure), false),
+		stopChan:     make(chan struct{}),
 	}, nil
 }
 
@@ -49,4 +57,10 @@ func (t *defaultTaskRunner) Run() {
 // Stop stops the looping over the provided function given to Run().
 func (t *defaultTaskRunner) Stop() {
 	t.taskExecuter.Stop()
+	t.stopChan <- struct{}{}
+	close(t.stopChan)
+}
+
+func (t *defaultTaskRunner) Stopped() chan struct{} {
+	return t.stopChan
 }
