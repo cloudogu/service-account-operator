@@ -710,6 +710,28 @@ func TestController_setSaRotationWatcher(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, sut.rotateCronWatcher[consumerName])
 	})
+	t.Run("should fail on invalid cron syntax", func(t *testing.T) {
+		// given
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, mock.Anything, mock.Anything).Return(nil, assert.AnError)
+
+		sare := &testSare
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
+
+		// when
+		sare.Spec.Rotation.Enabled = true
+		sare.Spec.Rotation.Rotation = "\u1234-----fail-me"
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
+
+		// then
+		require.Error(t, err)
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+		assert.ErrorContains(t, err, `failed to set cron watcher for SARE "grafana-to-prometheus-ecosystem"`)
+	})
 }
 
 func TestController_EnqueueRequestsForProducer(t *testing.T) {
