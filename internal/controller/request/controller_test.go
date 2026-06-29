@@ -208,39 +208,6 @@ func TestController_Reconcile(t *testing.T) {
 		}
 	})
 
-	t.Run("should skip reconcile when target secret already exists in cluster", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := testSare
-		sare.Finalizers = []string{finalizer}
-		existingSecret := newOwnedSecret("grafana-to-prometheus", "ecosystem", &sare, scheme, t)
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare, existingSecret).Build()
-		factoryMock := newMockProducerClientFactory(t)
-		recorder := newFakeRecorder(t, nil)
-		controller := New(rtClient, scheme, testOperatorConfig, recorder)
-		controller.producerClientFactory = factoryMock
-
-		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.NoError(t, err)
-		assert.Equal(t, ctrl.Result{}, result)
-	})
-
-	t.Run("should skip reconcile when custom secretRef target already exists in cluster", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := testSare
-		sare.Finalizers = []string{finalizer}
-		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-secret"}
-		existingSecret := newOwnedSecret("custom-secret", "ecosystem", &sare, scheme, t)
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare, existingSecret).Build()
-		recorder := newFakeRecorder(t, nil)
-		controller := New(rtClient, scheme, testOperatorConfig, recorder)
-
-		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.NoError(t, err)
-		assert.Equal(t, ctrl.Result{}, result)
-	})
-
 	t.Run("should return wrapped error when secretManager.Exists fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := testSare
@@ -645,13 +612,43 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Fail(t, "implement me")
 	})
 
-	t.Run("should log update event with SARE params but the credentials did not change", func(t *testing.T) {
-		// given
+	t.Run("should not update secret if the credentials did not change", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := testSare
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&sare, new(testSapr)).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
 
-		// when
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
 
-		// then
-		assert.Fail(t, "implement me")
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, sare.Name, nil)
+
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller := New(rtClient, scheme, testOperatorConfig, recorder)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
+
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
 }
 
