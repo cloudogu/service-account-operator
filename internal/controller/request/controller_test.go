@@ -1184,10 +1184,19 @@ func Test_namespacedName_returnsCompoundName(t *testing.T) {
 func TestController_removeFinalizer(t *testing.T) {
 	t.Run("should return when finalizer is already removed", func(t *testing.T) {
 		// given
+		sare := &serviceaccountv2.ServiceAccountRequest{ObjectMeta: metav1.ObjectMeta{Finalizers: nil}}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(
+			interceptor.Funcs{Update: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				assert.Fail(t, "should not be called")
+				return nil
+			}},
+		).Build()
+		controller := &Controller{client: fakeClient}
 
 		// when
+		err := controller.removeFinalizer(testCtx, sare)
 
 		// then
-		assert.Fail(t, "implement me")
+		require.NoError(t, err)
 	})
 }
