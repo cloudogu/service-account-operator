@@ -25,6 +25,15 @@ func serviceAccountReady(ctx context.Context, c client.Client, sare *serviceacco
 		serviceaccountv2.ConditionReasonServiceAccountReadyCreated, "")
 }
 
+// serviceAccountNotReadyForRotation removes a previously created secret and sets ServiceAccountReady=false. The given
+// SARE will later be reconciled where the ready condition might be re-set to ready.
+func serviceAccountNotReadyForRotation(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest) error {
+	return setAndPersist(ctx, c, sare, func() {
+		sare.Status.SecretRef = nil // secret rotation is dealt by deleting a previous secret (if existing)
+	}, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
+		"SecretRotationInProgress", "")
+}
+
 // serviceAccountFailed sets ServiceAccountReady=False with the error message and persists the condition.
 func serviceAccountFailed(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
 	return setAndPersist(ctx, c, sare, nil, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionFalse,

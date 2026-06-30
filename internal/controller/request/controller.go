@@ -247,7 +247,13 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 	// deleteSaSecretFunc relies on deleting the secret to a consumer because we watch the secret for deletion.
 	// if the deletion is detected, an update to the SA is issued against the producer.
 	deleteSaSecretFunc := func(ctx context.Context) (int, error) {
-		err := c.secretManager.Delete(ctx, sare)
+		err := serviceAccountNotReadyForRotation(ctx, c.client, sare)
+		if err != nil {
+			logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+			logger.Error(err, "failed to update status conditions before service account rotation")
+		}
+
+		err = c.secretManager.Delete(ctx, sare)
 		if err != nil {
 			// currently, the gronx tasker uses the return code for debugging the gronx task.
 			return 1, fmt.Errorf("failed to delete service account secret %q for service account rotation: %w", sare.Name, err)
