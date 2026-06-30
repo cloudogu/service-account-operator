@@ -24,9 +24,6 @@ const (
 // producers requirements.
 type Params map[string]string
 
-// BehaviorParamsRotation indicates ways of how a Service Account's credential should be rotated.
-type BehaviorParamsRotation int
-
 // BehaviorParams may be used to by a consumer (via their SARE) to trigger actions towards the Service Account producer.
 type BehaviorParams struct {
 	// RotateServiceAccountNow indicates if a Service Account's credential should be rotated immediately.
