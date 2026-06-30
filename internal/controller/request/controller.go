@@ -270,8 +270,11 @@ func startTaskRunnerWithMemoryLeakPrevention(ctx context.Context, cronWatcher cr
 	go func() {
 		select {
 		case <-ctx.Done():
+			// stop the cronWatcher when the context is canceled, e.g., on shutdown.
 			cronWatcher.Stop()
 		case <-cronWatcher.Stopped():
+			// if we don't wait for a stop signal, goroutines will pile up whenever a cronWatcher is replaced.
+			// this would lead to a memory leak.
 		}
 	}()
 }
