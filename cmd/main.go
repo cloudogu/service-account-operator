@@ -57,7 +57,7 @@ func startManager(cfg *config.OperatorConfig) error {
 		return fmt.Errorf("failed to create manager: %w", err)
 	}
 
-	serviceAccountRequestController := request.New(mgr.GetClient(), mgr.GetScheme(), cfg, mgr.GetEventRecorder("service-account-operator"))
+	serviceAccountRequestController, sareCleanup := request.New(mgr.GetClient(), mgr.GetScheme(), cfg, mgr.GetEventRecorder("service-account-operator"))
 	if err := serviceAccountRequestController.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("failed to create service account request controller: %w", err)
 	}
@@ -75,10 +75,10 @@ func startManager(cfg *config.OperatorConfig) error {
 		return fmt.Errorf("failed to set up ready check: %w", err)
 	}
 
-	return startManagerWithGracefulShutdown(mgr)
+	return startManagerWithGracefulShutdown(mgr, sareCleanup)
 }
 
-func startManagerWithGracefulShutdown(mgr ctrl.Manager) error {
+func startManagerWithGracefulShutdown(mgr ctrl.Manager, sareCleanup func()) error {
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -89,10 +89,10 @@ func startManagerWithGracefulShutdown(mgr ctrl.Manager) error {
 
 	mainLog.Info("starting manager")
 
-	return waitForGracefulShutdown(signalCtx, gracefulShutdownTimeout, managerErrCh)
+	return waitForGracefulShutdown(signalCtx, gracefulShutdownTimeout, managerErrCh, sareCleanup)
 }
 
-func waitForGracefulShutdown(ctx context.Context, timeout time.Duration, managerErrCh <-chan error) error {
+func waitForGracefulShutdown(ctx context.Context, timeout time.Duration, managerErrCh <-chan error, sareCleanup func()) error {
 	select {
 	case err := <-managerErrCh:
 		if err != nil {
@@ -102,6 +102,8 @@ func waitForGracefulShutdown(ctx context.Context, timeout time.Duration, manager
 	case <-ctx.Done():
 		mainLog.Info("shutdown signal received, stopping manager gracefully")
 	}
+
+	sareCleanup()
 
 	// After shutdown was requested, wait for the manager to exit on its own and only
 	// fail if that graceful shutdown exceeds the configured timeout.

@@ -51,16 +51,21 @@ func (d *defaultCronTaskFactory) New(ctx context.Context, expr string, jobClosur
 	return cron.New(ctx, expr, jobClosure)
 }
 
-func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) *Controller {
+func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) (controller *Controller, cleanup func()) {
+	runners := make(map[string]cron.TaskRunner)
 	return &Controller{
-		client:                rtClient,
-		secretManager:         sa.NewSecretManager(rtClient, scheme),
-		producerClientFactory: producer.NewClientFactory(rtClient),
-		operatorConfig:        operatorConfig,
-		eventRecorder:         eventRecorder,
-		cronTaskFactory:       new(defaultCronTaskFactory),
-		rotateCronWatcher:     make(map[string]cron.TaskRunner),
-	}
+			client:                rtClient,
+			secretManager:         sa.NewSecretManager(rtClient, scheme),
+			producerClientFactory: producer.NewClientFactory(rtClient),
+			operatorConfig:        operatorConfig,
+			eventRecorder:         eventRecorder,
+			cronTaskFactory:       new(defaultCronTaskFactory),
+			rotateCronWatcher:     runners,
+		}, func() {
+			for _, runner := range runners {
+				runner.Stop()
+			}
+		}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -256,27 +261,14 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
 	}
 
-	startTaskRunnerWithMemoryLeakPrevention(ctx, cronWatcher)
+	go func() {
+		// stop is done either on replace or through the cleanup function of the controller.
+		cronWatcher.Run()
+	}()
 
 	c.rotateCronWatcher[sareName] = cronWatcher
 
 	return nil
-}
-
-func startTaskRunnerWithMemoryLeakPrevention(ctx context.Context, cronWatcher cron.TaskRunner) {
-	go func() {
-		cronWatcher.Run()
-	}()
-	go func() {
-		select {
-		case <-ctx.Done():
-			// stop the cronWatcher when the context is canceled, e.g., on shutdown.
-			cronWatcher.Stop()
-		case <-cronWatcher.Stopped():
-			// if we don't wait for a stop signal, goroutines will pile up whenever a cronWatcher is replaced.
-			// this would lead to a memory leak.
-		}
-	}()
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {

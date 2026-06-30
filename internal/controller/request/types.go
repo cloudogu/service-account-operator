@@ -53,6 +53,4 @@ type taskRunner interface {
 	Run()
 	// Stop interrupts the provided task.
 	Stop()
-	// Stopped returns a channel indicating the runner was stopped.
-	Stopped() chan struct{}
 }

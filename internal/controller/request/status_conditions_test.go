@@ -45,16 +45,16 @@ func getFreshSareFromCluster(t *testing.T, c client.Client, sare *serviceaccount
 
 func TestProducerNotFound(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with ProducerNotFound reason and persist to cluster", func(t *testing.T) {
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
 		sare.Spec.Optional = true
-		rtClient := buildStatusClient(t, &sare)
+		rtClient := buildStatusClient(t, sare)
 
-		err := producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found"))
+		err := producerNotFound(testCtx, rtClient, sare, "prometheus", fmt.Errorf("not found"))
 
 		require.NoError(t, err)
-		updated := getFreshSareFromCluster(t, rtClient, &sare)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
@@ -65,15 +65,15 @@ func TestProducerNotFound(t *testing.T) {
 
 func TestServiceAccountReady(t *testing.T) {
 	t.Run("should set ServiceAccountReady=True and persist to cluster", func(t *testing.T) {
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusClient(t, &sare)
+		rtClient := buildStatusClient(t, sare)
 
-		err := serviceAccountReady(testCtx, rtClient, &sare, "test-secret")
+		err := serviceAccountReady(testCtx, rtClient, sare, "test-secret")
 
 		require.NoError(t, err)
-		updated := getFreshSareFromCluster(t, rtClient, &sare)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
@@ -85,16 +85,16 @@ func TestServiceAccountReady(t *testing.T) {
 
 func TestServiceAccountFailed(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with error message and persist to cluster", func(t *testing.T) {
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusClient(t, &sare)
+		rtClient := buildStatusClient(t, sare)
 
 		reconcileErr := errors.New("connection refused")
-		err := serviceAccountFailed(testCtx, rtClient, &sare, reconcileErr)
+		err := serviceAccountFailed(testCtx, rtClient, sare, reconcileErr)
 
 		require.NoError(t, err)
-		updated := getFreshSareFromCluster(t, rtClient, &sare)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
@@ -103,12 +103,12 @@ func TestServiceAccountFailed(t *testing.T) {
 	})
 
 	t.Run("should return error containing condition type when persist fails", func(t *testing.T) {
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusClientWithoutObject(t)
 
-		err := serviceAccountFailed(testCtx, rtClient, &sare, errors.New("boom"))
+		err := serviceAccountFailed(testCtx, rtClient, sare, errors.New("boom"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeServiceAccountReady)
@@ -117,15 +117,15 @@ func TestServiceAccountFailed(t *testing.T) {
 
 func TestSequentialConditions(t *testing.T) {
 	t.Run("should persist both conditions when called in sequence on the same SARE", func(t *testing.T) {
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "test-sare"
 		sare.Finalizers = []string{finalizer}
-		rtClient := buildStatusClient(t, &sare)
+		rtClient := buildStatusClient(t, sare)
 
-		require.NoError(t, producerNotFound(testCtx, rtClient, &sare, "prometheus", fmt.Errorf("not found")))
-		require.NoError(t, serviceAccountReady(testCtx, rtClient, &sare, "test-secret"))
+		require.NoError(t, producerNotFound(testCtx, rtClient, sare, "prometheus", fmt.Errorf("not found")))
+		require.NoError(t, serviceAccountReady(testCtx, rtClient, sare, "test-secret"))
 
-		updated := getFreshSareFromCluster(t, rtClient, &sare)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
 
 		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, cond)
