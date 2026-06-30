@@ -87,8 +87,11 @@ Für eine Rotation muss allerdings der DSA-Producer eine Aktualisierung von Cred
 garantiert das DSA-Secret aktualisiert, d. h. der DSA-Consumer muss auf diese Änderung reagieren (bei EnvVars ein
 Pod-Neustart, bei Dateimounts ein neues Auslesen der Datei etc).
 
-> TODO Secret rotieren durch Secret-Löschung
->
+Ein einfacher Weg, einmalig solch eine Secret-Rotation anzustoßen, ist die Löschung des genannten Secrets. Der
+Service-Account-Operator horcht auf Löschung von Secrets. Handelt sich hierbei um ein DSA-Secret, wird beim Producer
+eine Credential Rotation angestoßen. In der Zeit zwischen Secret-Löschung und Neuerzeugung kann voraussichtlich der
+Consumer mit dem alten Secret auf den Producer zugreifen, da der Producer evtl. bereits die Credentials ausgetauscht
+haben kann.
 
 ### DSA-Producer wird deinstalliert
 
