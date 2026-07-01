@@ -128,7 +128,7 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	}
 	logger.Info("service account request needs to be " + createOrUpdateString)
 
-	if sare.Spec.Rotation.Enabled {
+	if sare.Spec.Rotation != nil && sare.Spec.Rotation.Enabled {
 		err := c.setSaRotationWatcher(ctx, sare)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to replace service account rotation expression: %w", err)
