@@ -70,7 +70,7 @@ func TestServiceAccountReady(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusClient(t, sare)
 
-		err := serviceAccountReady(testCtx, rtClient, sare, "test-secret")
+		err := serviceAccountReady(testCtx, rtClient, sare, "test-secret", false)
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, sare)
@@ -80,6 +80,25 @@ func TestServiceAccountReady(t *testing.T) {
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, cond.Reason)
 		require.NotNil(t, updated.Status.SecretRef)
 		assert.Equal(t, "test-secret", updated.Status.SecretRef.Name)
+		assert.Empty(t, updated.Status.LastRotation)
+	})
+	t.Run("should set ServiceAccountReady=True with rotation and persist to cluster", func(t *testing.T) {
+		sare := createTestSare()
+		sare.Name = "test-sare"
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusClient(t, sare)
+
+		err := serviceAccountReady(testCtx, rtClient, sare, "test-secret", true)
+
+		require.NoError(t, err)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, cond.Reason)
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "test-secret", updated.Status.SecretRef.Name)
+		assert.NotEmpty(t, updated.Status.LastRotation)
 	})
 }
 
@@ -123,7 +142,7 @@ func TestSequentialConditions(t *testing.T) {
 		rtClient := buildStatusClient(t, sare)
 
 		require.NoError(t, producerNotFound(testCtx, rtClient, sare, "prometheus", fmt.Errorf("not found")))
-		require.NoError(t, serviceAccountReady(testCtx, rtClient, sare, "test-secret"))
+		require.NoError(t, serviceAccountReady(testCtx, rtClient, sare, "test-secret", false))
 
 		updated := getFreshSareFromCluster(t, rtClient, sare)
 

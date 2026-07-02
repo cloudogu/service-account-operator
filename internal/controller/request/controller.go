@@ -172,9 +172,8 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err))
 	}
 
-	if credentials == nil {
-		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
-	} else {
+	isRotation := credentials != nil
+	if isRotation {
 		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 		if err != nil {
 			return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
@@ -182,9 +181,11 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 
 		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
 		c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
+	} else {
+		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
 	}
 
-	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
+	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
