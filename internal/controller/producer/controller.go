@@ -12,9 +12,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// readinessCheckInterval is how often a producer is re-checked for readiness.
-const readinessCheckInterval = 5 * time.Minute
-
 // serviceAccountClient manages service accounts on a specific producer.
 // Defined here for mock generation.
 type serviceAccountClient interface { //nolint:unused
@@ -29,14 +26,16 @@ type clientFactory interface {
 
 // Controller reconciles ServiceAccountProducer resources.
 type Controller struct {
-	client        client.Client
-	clientFactory clientFactory
+	client            client.Client
+	clientFactory     clientFactory
+	reconcileInterval time.Duration
 }
 
-func New(rtClient client.Client) *Controller {
+func New(rtClient client.Client, reconcileInterval time.Duration) *Controller {
 	return &Controller{
-		client:        rtClient,
-		clientFactory: producerclient.NewClientFactory(rtClient),
+		client:            rtClient,
+		clientFactory:     producerclient.NewClientFactory(rtClient),
+		reconcileInterval: reconcileInterval,
 	}
 }
 
@@ -56,14 +55,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{RequeueAfter: readinessCheckInterval}, nil
+		return ctrl.Result{RequeueAfter: c.reconcileInterval}, nil
 	}
 
 	if err := markReady(ctx, c.client, &sapr); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: readinessCheckInterval}, nil
+	return ctrl.Result{RequeueAfter: c.reconcileInterval}, nil
 }
 
 // checkReady validates the producer and probes its endpoint. On failure it returns the matching

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+const reconcileInterval = time.Second * 10
+
 var testCtx = context.Background()
 
 func TestController_Reconcile(t *testing.T) {
@@ -30,12 +33,12 @@ func TestController_Reconcile(t *testing.T) {
 		saClient.EXPECT().Ready(testCtx).Return(nil)
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = factory
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
-		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
+		assert.Equal(t, reconcileInterval, result.RequeueAfter)
 
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
@@ -51,12 +54,12 @@ func TestController_Reconcile(t *testing.T) {
 		saClient.EXPECT().Ready(testCtx).Return(errors.New("connection refused"))
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = factory
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
-		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
+		assert.Equal(t, reconcileInterval, result.RequeueAfter)
 
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
@@ -71,12 +74,12 @@ func TestController_Reconcile(t *testing.T) {
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).
 			Return(nil, errors.New("failed to get auth secret"))
 
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = factory
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
-		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
+		assert.Equal(t, reconcileInterval, result.RequeueAfter)
 
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
@@ -89,12 +92,12 @@ func TestController_Reconcile(t *testing.T) {
 		sapr.Spec.HTTP = nil
 		rtClient := newClientWith(t, sapr)
 		// The factory is never consulted because the configuration is rejected first.
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = newMockProducerClientFactory(t)
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
 		require.NoError(t, err)
-		assert.Equal(t, readinessCheckInterval, result.RequeueAfter)
+		assert.Equal(t, reconcileInterval, result.RequeueAfter)
 
 		cond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, cond)
@@ -120,7 +123,7 @@ func TestController_Reconcile(t *testing.T) {
 		saClient.EXPECT().Ready(testCtx).Return(errors.New("connection refused"))
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = factory
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
@@ -147,7 +150,7 @@ func TestController_Reconcile(t *testing.T) {
 		saClient.EXPECT().Ready(testCtx).Return(nil)
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = factory
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
@@ -158,7 +161,7 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should ignore not found", func(t *testing.T) {
 		rtClient := newClientWith(t)
-		controller := New(rtClient)
+		controller := New(rtClient, reconcileInterval)
 		controller.clientFactory = newMockProducerClientFactory(t)
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("missing-producer", "default"))
