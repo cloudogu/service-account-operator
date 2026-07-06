@@ -128,13 +128,9 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	}
 	logger.Info("service account request needs to be " + createOrUpdateString)
 
-	if sare.Spec.Rotation != nil && sare.Spec.Rotation.Enabled {
-		err := c.setSaRotationWatcher(ctx, sare)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to replace service account rotation expression: %w", err)
-		}
-	} else {
-		c.deleteSaRotationWatcher(sare)
+	err = c.handleSaRotationWatcher(ctx, sare)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
@@ -157,19 +153,9 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
 	}
 
-	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
-	}
-
-	behaviorParams := producer.BehaviorParams{}
-	if !secretExists {
-		behaviorParams.RotateServiceAccountNow = true
-	}
-
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err))
+		return ctrl.Result{}, c.fail(ctx, sare, err)
 	}
 
 	isRotation := credentials != nil
@@ -190,6 +176,37 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err)
+	}
+
+	behaviorParams := producer.BehaviorParams{}
+	if !secretExists {
+		behaviorParams.RotateServiceAccountNow = true
+	}
+
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err)
+	}
+
+	return credentials, nil
+}
+
+func (c *Controller) handleSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	if sare.Spec.Rotation != nil && sare.Spec.Rotation.Enabled {
+		err := c.setSaRotationWatcher(ctx, sare)
+		if err != nil {
+			return fmt.Errorf("failed to replace service account rotation expression: %w", err)
+		}
+	} else {
+		c.deleteSaRotationWatcher(sare)
+	}
+	return nil
 }
 
 func (c *Controller) getServiceAccountClient(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (serviceAccountClient, error) {
