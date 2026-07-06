@@ -28,6 +28,11 @@ paths:
                   type: array
                   items:
                     type: string
+                behaviorParams:
+                  type: object
+                  properties:
+                    rotateServiceAccountNow:
+                      type: boolean
               required: ["consumer"]
       responses:
         '200':
