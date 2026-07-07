@@ -67,6 +67,19 @@ func TestNewOperatorConfig(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to read deletion timeout")
 	})
 
+	t.Run("should return error on error reading producer reconcile interval", func(t *testing.T) {
+		// given
+		t.Setenv(namespaceEnvVar, "testNamespace")
+		t.Setenv(deletionTimeoutEnvVar, "24h")
+
+		// when
+		_, err := NewOperatorConfig(testScheme)
+
+		// then
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to read producer reconcile interval")
+	})
+
 	t.Run("should use configured namespace and return controller options", func(t *testing.T) {
 		resetFlagStateForTest(t, []string{
 			"--metrics-bind-address=:9443",
@@ -358,6 +371,59 @@ func Test_getDeletionTimeout(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("getDeletionTimeout() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_getProducerReconcileInterval(t *testing.T) {
+	tests := []struct {
+		name        string
+		prepareTest func(t *testing.T)
+		want        time.Duration
+		wantErr     assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return error on missing env var",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(producerReconcileIntervalEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(producerReconcileIntervalEnvVar, oldEnv))
+				})
+				require.NoError(t, os.Unsetenv(producerReconcileIntervalEnvVar))
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to get env var [PRODUCER_RECONCILE_INTERVAL]")
+			},
+		},
+		{
+			name: "should return error on invalid env var value",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(producerReconcileIntervalEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(producerReconcileIntervalEnvVar, oldEnv))
+				})
+				t.Setenv(producerReconcileIntervalEnvVar, "invalid")
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to parse env var [PRODUCER_RECONCILE_INTERVAL] with value [invalid]")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.prepareTest != nil {
+				tt.prepareTest(t)
+			}
+
+			got, err := getProducerReconcileInterval()
+
+			if tt.wantErr != nil {
+				tt.wantErr(t, err, "getProducerReconcileInterval() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if got != tt.want {
+				t.Errorf("getProducerReconcileInterval() got = %v, want %v", got, tt.want)
 			}
 		})
 	}
