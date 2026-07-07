@@ -47,3 +47,15 @@ Dieses Target baut und paketiert das Helm-Chart und wendet die `Component`-Resso
 kubectl -n ecosystem get deployment service-account-operator
 kubectl -n ecosystem get pods -l app.kubernetes.io/name=service-account-operator
 ```
+
+## Testen von SARE/SAPR
+
+Für Tests der Funktionalitäten bietet sich die SAPR-ready Komponente [k8s-prometheus](https://github.com/cloudogu/k8s-prometheus) an
+
+Ein Service-Account kann dann mittels SARE aus dem [K8s-Sample-Repo](https://github.com/cloudogu/k8s-ecosystem-samples/tree/main/serviceaccount) erstellt werden:
+
+1. k8s-prometheus-Stand mit SAPR auf Cluster anwenden
+   - z. B. mittels `make component-apply`
+2. SARE für Prometheus auf Cluster anwenden
+   - `kubectl -n ecosystem apply -f https://raw.githubusercontent.com/cloudogu/k8s-ecosystem-samples/refs/heads/main/serviceaccount/requester.yaml`
+3. ein Secret `grafana-prometheus-credentials` wurde im Cluster vom SA-Operator angelegt

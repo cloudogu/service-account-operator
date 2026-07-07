@@ -8,9 +8,9 @@ Dogu-Trennung notwendig machten.
 Mit der Dogu-API v3 ist dies für Hilfscontainer nicht mehr nötig, da Dogu Helm-Charts eigene, weitere beliebige
 Container hervorbringen können, für deren Zugriff kein CES-übergreifender Mechanismus nötig ist. Allerdings ist es
 weiterhin möglich, das Dogus miteinander kommunizieren können. Hierzu werden weiterhin Dogu-API v3 Service Accounts
-(DSA) benötigt. Diese DSA nicht nur für Dogus, sondern auch für CES-Komponenten, die auf Dogus oder andere
-CES-Komponenten per API zugreichen möchten. Beide können sowohl als DSA-Consumer und/oder als DSA
-Producer auftreten.
+(DSA) benötigt. Trotz des Namens gelten diese DSAs nicht nur für Dogus, sondern auch für CES-Komponenten, die auf Dogus
+oder andere CES-Komponenten per API zugreichen möchten. Beide können sowohl als DSA-Consumer und/oder als DSA Producer
+auftreten, das auch Ringabhängigkeiten erlaubt. Dogus bzw Komponenten können ordentlich zu Ende installiert werden. Der Service Account Operator sorgt dank des SARE/SAPR-Mechanismus' für die Entkopplung dieser Abhängigkeiten.
 
 Es können viele verschiedene Dogus oder Komponenten bei einem DSA-Producer einen DSA erbitten, sodass einer SAPR
 CR mehrere SARE CRs gegenüber stehen. Die Zuordnung eines SAREs zu einem SAPR bleibt davon aber unbeschadet. Die
@@ -22,8 +22,6 @@ Damit der Prozess der DSA-Erzeugung/Updates/Löschung erfolgreich durchgeführt 
 die _Service Account Producer API_ implementieren. Diese liegt als [OpenAPI-Spezifikation vor](openapi.yaml).
 
 Dieses Dokument beschreibt Szenarien, in denen DSAs erzeugt, modifiziert oder gelöscht werden.
-
-_* Law & Order Special Victims Unit dumdumm sound *_
 
 ## DSA erzeugen
 
@@ -108,13 +106,14 @@ Datenbestand muss neu verschlüsselt werden.
 Unter diesem Umstand kann analog zum Abschnitt [Änderung von DSA-Parametern](#änderung-von-dsa-parametern) das
 DSA-Secret aktualisiert werden, worauf der DSA-Consumer ebenso reagieren muss.
 
----
+der Producer erfordert ein Update des SA-Secrets, kann dies aber nicht selbst veranlassen. Dies muss jedoch dem Consumer
+ebenfalls bekannt sein. Damit dies programmatisch umgesetzt werden kann, gibt es hier unterschiedliche Wege, die nicht
+gleichermaßen bereits vollständig unterstützt werden.... bitte erklären wie
 
-> TODO: hier bin ich mir nicht mehr sicher, welche API das sein soll. Die HTTP-API ggü. dem SA-Op muss doch nur diesem
-> bekannt sein. Diese wird auch nur dann interessant, wenn der nächste Änderungs-/Lösch-Call aufkommt. Dann weiß aber
-> der SA-Op doch, wie die API gestrickt sein muss, da der Producer dies doch bereits vorher dokumentiert.
-
-Gleiches gilt, wenn der Producer seine eigene API äääääh....
+Gleiches gilt, wenn der Producer strukturell seine eigene API ändert. Diese können z. B. Änderungen an Endpunkte-URL
+sein, inhaltliche Änderungen an Credentials oder die Weise wie Credentials zurückgegeben werden. In diesem Fall muss
+ohnehin die Service-Account-Consumer in Releases mit vorher gültigen SAREs die Credentials nicht oder nur mangelhaft
+einlesen. Consumer müssen daher mit einem eigenen Release auf das Producer-Upgrade zeitgleich vorbereitet werden.
 
 ## DSA löschen
 
@@ -124,4 +123,4 @@ sollte der SARE in einem Upgrade gelöscht werden. Dieser Löschvorgang entspric
 gelöscht.
 
 Der DSA-Producer muss auf diese Änderung so reagieren, dass sowohl sämtliche Credentials als auch Nutzdaten des
-betroffenen DSA-Consumers gelöscht werden.
+betroffenen DSA-Consumers gelöscht werden. Dieses Vorgehen spart nicht nur Ressourcen, sondern entspricht auch unserem Datenschutzverständnis: Gelöschte Daten können nicht unberechtigt eingesehen oder weitergegeben werden.
