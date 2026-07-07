@@ -11,6 +11,7 @@ import (
 	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
+	"github.com/go-logr/logr"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	corev1 "k8s.io/api/core/v1"
@@ -109,60 +110,51 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // See cloudogu/service-account-operator#8
 
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
+	secretName, isRotation, abort, err := c.createOrUpdate(ctx, sare)
+	if err != nil {
+		return ctrl.Result{}, c.fail(ctx, sare, err)
+	} else if abort {
+		return ctrl.Result{}, nil
+	}
+
+	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (secretName string, isRotation bool, abort bool, err error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
-	secretExists, secretName, err := c.secretManager.Exists(ctx, sare)
+	secretExists, secretName, err := c.checkSecretExists(ctx, sare, logger)
 	if err != nil {
-		if errors.Is(err, sa.ErrSecretConflict) {
-			return ctrl.Result{}, c.fail(ctx, sare, err)
-		}
-
-		logger.Error(err, "failed to check if service account secret exists")
-
-		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
+		return "", false, true, err
 	}
 
-	createOrUpdateString := "created"
-	if secretExists {
-		createOrUpdateString = "updated"
-	}
+	createOrUpdateString := createdOrUpdated(secretExists)
 	logger.Info("service account request needs to be " + createOrUpdateString)
 
 	err = c.handleSaRotationWatcher(ctx, sare)
 	if err != nil {
-		return ctrl.Result{}, err
+		return "", false, true, err
 	}
 
-	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
-			deleteErr := c.secretManager.Delete(ctx, sare)
-			if deleteErr != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to delete service account secret of deleted producer %q: %w", sapr.Name, deleteErr)
-			}
-
-			if sare.Spec.Optional {
-				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
-			}
-
-			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
-		}
-
-		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	sapr, abort, err := c.getProducerForCreateOrUpdate(ctx, sare, logger)
+	if abort || err != nil {
+		return "", false, true, err
 	}
 
 	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
 	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, err)
+		return "", false, true, err
 	}
 
-	isRotation := credentials != nil
+	isRotation = credentials != nil
 	if isRotation {
 		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 		if err != nil {
-			return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
+			return "", false, true, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
 		}
 
 		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
@@ -171,11 +163,52 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
 	}
 
-	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
-	}
+	return secretName, isRotation, false, nil
+}
 
-	return ctrl.Result{}, nil
+func (c *Controller) getProducerForCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (sapr *serviceaccountv2.ServiceAccountProducer, abort bool, err error) {
+	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
+			deleteErr := c.secretManager.Delete(ctx, sare)
+			if deleteErr != nil {
+				return nil, true, fmt.Errorf("failed to delete service account secret of deleted producer %q: %w", sapr.Name, deleteErr)
+			}
+
+			if sare.Spec.Optional {
+				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
+				return nil, true, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
+			}
+
+			return nil, true, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
+		}
+
+		return nil, true, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	}
+	return sapr, false, nil
+}
+
+func (c *Controller) checkSecretExists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (bool, string, error) {
+	secretExists, secretName, err := c.secretManager.Exists(ctx, sare)
+	if err != nil {
+		if errors.Is(err, sa.ErrSecretConflict) {
+			return false, "", err
+		}
+
+		logger.Error(err, "failed to check if service account secret exists")
+
+		return false, "", fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
+	}
+	return secretExists, secretName, nil
+}
+
+func createdOrUpdated(secretExists bool) string {
+	createOrUpdateString := "created"
+	if secretExists {
+		createOrUpdateString = "updated"
+	}
+	return createOrUpdateString
 }
 
 func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {
