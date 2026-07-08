@@ -17,7 +17,7 @@ Service-Account-Operator verwendet werden.
 **Consumer** hingegen beschreiben ihren Wunsch nach einem Service Account bei einem bestimmten Producer
 und in welchem Secret dieser Service Account vom Service-Account-Operator abgelegt werden soll. 
 
-![Ein DSA-Producer (unbestimmt, ob Dogu oder Component) enthält einn SAPR-Ressource mit dem Producernamen "gareth".
+![Ein DSA-Producer (unbestimmt, ob Dogu oder Component) enthält einen SAPR-Ressource mit dem Producernamen "gareth".
 Dem gegenüber stehen ein DSA-Consumer-Dogu und eine DSA-Consumer-Komponente, die ihrerseits einen DSA mit dem
 Producernamen "gareth" erfragen. Der Service-Account-Operator erkennt die Übereinstimmung und erzeugt jeweils ein Secret
 welches dem DSA zwischen Consumer und Producer entspricht.](images/relationship_sare_sapr.drawio.png
