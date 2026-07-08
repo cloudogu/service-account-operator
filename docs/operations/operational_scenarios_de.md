@@ -33,9 +33,9 @@ Dieses Dokument beschreibt Szenarien, in denen DSAs erzeugt, modifiziert oder ge
 Im Gegensatz zur DSA-Modifikation gibt es für eine DSA-Erzeugung nur ein einziges Szenario. Es benötigt zwei Ressourcen,
 damit erfolgreich ein DSA benutzt werden kann:
 
-1. Existenz einer Service-Account-Request-CR (`SARE`)
+1. Existenz einer ServiceAccountRequest-CR (`SARE`)
    - dies entspricht einem DSA-Consumer
-2. Existenz einer Service-Account-Producer-CR (`SAPR`)
+2. Existenz einer ServiceAccountProducer-CR (`SAPR`)
    - dies entspricht einem DSA-Producer
 
 Wenn die Anforderung von SARE und SAPR in dem jeweiligen Feld `.spec.producer` übereinstimmen, dann erzeugt der
@@ -64,8 +64,8 @@ einer Änderung eines DSA führen können.
 Bei Änderungen der Producer-API muss die SAPR-CR aktualisiert werden. Diese Änderungen können z. B. Änderungen an der
 Endpunkte-URL sein, den DSA-Parametern oder der Struktur, in der Credentials zurückgegeben werden.
 
-Wenn sich daraus beim Producer die DSA-Parameter ändern, muss der DSA-Consumer auch entsprechend angepasst werden,
-siehe nächsten Abschnitt.
+Wenn sich daraus beim Producer die DSA-Parameter oder die Credential-Struktur ändern, muss der DSA-Consumer auch
+entsprechend angepasst werden, siehe nächsten Abschnitt.
 
 ### Änderung von DSA-Parametern
 

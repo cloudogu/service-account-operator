@@ -4,7 +4,7 @@ Service Accounts nach Dogu-API v3 beschreiben einen Mechanismus, der übergreife
 technische Zugänge ermöglicht. Hierbei fungiert der Service-Account-Operator als strikter Vermittler zwischen Producer
 und Consumer. 
 
-Ein **Producer** stellt eine Service-Account-Producer (SAPR) _Custom Resource_ zur Verfügung, die seine eigene API
+Ein **Producer** stellt eine Service-Account-Producer (SAPR) _Custom-Resource_ zur Verfügung, die seine eigene API
 zur Erzeugung von Zugängen beschreibt. Da jede Software unterschiedliche Zugangsnotwendigkeiten besitzt,
 beschreibt sie auch, wie die Zugangsdaten inhaltlich aufgebaut sind. Z. B. könnte ein Producer lediglich Kontoname und
 Passphrase zurückliefern, während ein anderer zusätzlich Schema- oder URL-Informationen für die Adressierung des Zugangs
