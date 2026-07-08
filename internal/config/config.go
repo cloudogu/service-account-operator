@@ -9,10 +9,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
+// constants for tuning the operator behavior
 const (
-	StageDevelopment                = "development"
-	StageProduction                 = "production"
-	StageEnvVar                     = "STAGE"
+	stageDevelopment                = "development"
+	stageProduction                 = "production"
+	stageEnvVar                     = "STAGE"
 	namespaceEnvVar                 = "NAMESPACE"
 	logLevelEnvVar                  = "LOG_LEVEL"
 	deletionTimeoutEnvVar           = "DELETION_TIMEOUT"
@@ -20,10 +21,10 @@ const (
 )
 
 var log = ctrl.Log.WithName("config")
-var Stage = StageProduction
+var Stage = stageProduction
 
 func isStageDevelopment() bool {
-	return Stage == StageDevelopment
+	return Stage == stageDevelopment
 }
 
 // OperatorConfig contains the runtime configuration required to start the operator.
@@ -104,10 +105,10 @@ func getProducerReconcileInterval() (time.Duration, error) {
 
 func configureStage() {
 	var err error
-	Stage, err = getEnvVar(StageEnvVar)
+	Stage, err = getEnvVar(stageEnvVar)
 	if err != nil {
 		log.Error(err, "error reading stage environment variable, using production")
-		Stage = StageProduction
+		Stage = stageProduction
 	}
 
 	if isStageDevelopment() {

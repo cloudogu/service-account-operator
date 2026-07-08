@@ -19,8 +19,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		resetFlagStateForTest(t, nil)
 		overrideLookupEnvForTest(t, func(key string) (string, bool) {
 			switch key {
-			case StageEnvVar:
-				return StageDevelopment, true
+			case stageEnvVar:
+				return stageDevelopment, true
 			default:
 				return "", false
 			}
@@ -50,8 +50,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		if got, want := err.Error(), "failed to read namespace: failed to get env var [NAMESPACE]: environment variable NAMESPACE must be set"; got != want {
 			t.Fatalf("NewOperatorConfig() error = %q, want %q", got, want)
 		}
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 
@@ -88,7 +88,7 @@ func TestNewOperatorConfig(t *testing.T) {
 			"--metrics-secure=false",
 			"--enable-http2=true",
 		})
-		t.Setenv(StageEnvVar, StageDevelopment)
+		t.Setenv(stageEnvVar, stageDevelopment)
 		t.Setenv(namespaceEnvVar, "ecosystem")
 		t.Setenv(deletionTimeoutEnvVar, "24h")
 		t.Setenv(producerReconcileIntervalEnvVar, "10s")
@@ -125,8 +125,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		if !actual.ControllerOptions.LeaderElection {
 			t.Fatal("LeaderElection = false, want true")
 		}
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 }
@@ -137,12 +137,12 @@ func TestIsStageDevelopment(t *testing.T) {
 		Stage = oldStage
 	})
 
-	Stage = StageDevelopment
+	Stage = stageDevelopment
 	if !isStageDevelopment() {
 		t.Fatal("isStageDevelopment() = false, want true")
 	}
 
-	Stage = StageProduction
+	Stage = stageProduction
 	if isStageDevelopment() {
 		t.Fatal("isStageDevelopment() = true, want false")
 	}
@@ -206,7 +206,7 @@ func TestGetNamespace(t *testing.T) {
 
 func TestConfigureStage(t *testing.T) {
 	t.Run("should set stage to development", func(t *testing.T) {
-		t.Setenv(StageEnvVar, StageDevelopment)
+		t.Setenv(stageEnvVar, stageDevelopment)
 
 		oldStage := Stage
 		oldLog := log
@@ -223,13 +223,13 @@ func TestConfigureStage(t *testing.T) {
 
 		configureStage()
 
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 
 	t.Run("should set stage to production when configured as production", func(t *testing.T) {
-		t.Setenv(StageEnvVar, StageProduction)
+		t.Setenv(stageEnvVar, stageProduction)
 
 		oldStage := Stage
 		oldLog := log
@@ -245,14 +245,14 @@ func TestConfigureStage(t *testing.T) {
 
 		configureStage()
 
-		if Stage != StageProduction {
-			t.Fatalf("Stage = %q, want %q", Stage, StageProduction)
+		if Stage != stageProduction {
+			t.Fatalf("Stage = %q, want %q", Stage, stageProduction)
 		}
 	})
 
 	t.Run("should fall back to production when stage env is missing", func(t *testing.T) {
 		overrideLookupEnvForTest(t, func(key string) (string, bool) {
-			if key == StageEnvVar {
+			if key == stageEnvVar {
 				return "", false
 			}
 			return lookupEnv(key)
@@ -271,11 +271,11 @@ func TestConfigureStage(t *testing.T) {
 		logMock.EXPECT().Error(mock.Anything, "error reading stage environment variable, using production").Return()
 		log = logr.New(logMock)
 
-		Stage = StageDevelopment
+		Stage = stageDevelopment
 		configureStage()
 
-		if Stage != StageProduction {
-			t.Fatalf("Stage = %q, want %q", Stage, StageProduction)
+		if Stage != stageProduction {
+			t.Fatalf("Stage = %q, want %q", Stage, stageProduction)
 		}
 	})
 }
