@@ -289,19 +289,26 @@ func (c *Controller) deleteSaRotationWatcher(sare *serviceaccountv2.ServiceAccou
 	}
 }
 
-func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (err error) {
-	sareName := namespacedName(sare)
-	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
-		cronWatcher.Stop()
-	}
-
-	// deleteSaSecretFunc relies on deleting the secret to a consumer because we watch the secret for deletion.
-	// if the deletion is detected, an update to the SA is issued against the producer.
-	deleteSaSecretFunc := func(ctx context.Context) (int, error) {
+// rotateSaSecretFunc produces a function that relies on deleting the secret of a consumer.
+// This works because we watch the secret for deletion.
+// If the deletion is detected, an update to the SA is issued against the producer.
+func (c *Controller) rotateSaSecretFunc(sare *serviceaccountv2.ServiceAccountRequest) func(ctx context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
 		logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-		logger.Info("rotating service account")
 
-		err := serviceAccountNotReadyForRotation(ctx, c.client, sare)
+		exists, secretName, err := c.secretManager.Exists(ctx, sare)
+		if err != nil {
+			return 1, fmt.Errorf("failed to check if secret %q exists for service account request %q during rotation: %w", secretName, sare.Name, err)
+		}
+
+		if !exists {
+			logger.Info("service account secret does not exist, skipping rotation", "secret", secretName)
+			return 0, nil
+		}
+
+		logger.Info("rotating service account by deleting secret", "secret", secretName)
+
+		err = serviceAccountNotReadyForRotation(ctx, c.client, sare)
 		if err != nil {
 			logger.Error(err, "failed to update status conditions before service account rotation")
 		}
@@ -309,13 +316,20 @@ func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceacco
 		err = c.secretManager.Delete(ctx, sare)
 		if err != nil {
 			// currently, the gronx tasker uses the return code for debugging the gronx task.
-			return 1, fmt.Errorf("failed to delete service account secret %q for service account rotation: %w", sare.Name, err)
+			return 1, fmt.Errorf("failed to delete secret %q for service account request %q during rotation: %w", secretName, sare.Name, err)
 		}
 
 		return 0, nil
 	}
+}
 
-	cronWatcher, err := c.cronTaskFactory.New(ctx, sare.Spec.Rotation.Rotation, deleteSaSecretFunc)
+func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (err error) {
+	sareName := namespacedName(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
+		cronWatcher.Stop()
+	}
+
+	cronWatcher, err := c.cronTaskFactory.New(ctx, sare.Spec.Rotation.Rotation, c.rotateSaSecretFunc(sare))
 	if err != nil {
 		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
 	}

@@ -1377,3 +1377,110 @@ func createTestSapr() *serviceaccountv2.ServiceAccountProducer {
 		},
 	}
 }
+
+func TestController_rotateSaSecretFunc(t *testing.T) {
+	tests := []struct {
+		name          string
+		constructorFn func(t *testing.T) *Controller
+		sare          *serviceaccountv2.ServiceAccountRequest
+		wantStatus    int
+		wantErr       assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should fail when checking if secret exists",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(false, "grafana-to-prometheus-sa-secret", assert.AnError)
+				return &Controller{secretManager: secretMock}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 1,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, assert.AnError, i) &&
+					assert.ErrorContains(t, err, "failed to check if secret \"grafana-to-prometheus-sa-secret\" exists for service account request \"grafana-to-prometheus\" during rotation")
+			},
+		},
+		{
+			name: "should return early if secret does not exist",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(false, "grafana-to-prometheus-sa-secret", nil)
+				return &Controller{secretManager: secretMock}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 0,
+			wantErr:    assert.NoError,
+		},
+		{
+			name: "should fail to delete secret",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(true, "grafana-to-prometheus-sa-secret", nil)
+				secretMock.EXPECT().Delete(t.Context(), mock.Anything).
+					Return(assert.AnError)
+
+				clientMock := newMockK8sClient(t)
+				clientStatusMock := newMockStatusClient(t)
+				clientMock.EXPECT().Status().Return(clientStatusMock)
+				clientStatusMock.EXPECT().Patch(t.Context(), mock.Anything, mock.Anything).
+					Return(assert.AnError)
+				return &Controller{
+					secretManager: secretMock,
+					client:        clientMock,
+				}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 1,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, assert.AnError, i) &&
+					assert.ErrorContains(t, err, "failed to delete secret \"grafana-to-prometheus-sa-secret\" for service account request \"grafana-to-prometheus\" during rotation")
+			},
+		},
+		{
+			name: "should successfully delete secret",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(true, "grafana-to-prometheus-sa-secret", nil)
+				secretMock.EXPECT().Delete(t.Context(), mock.Anything).
+					Return(nil)
+
+				clientMock := newMockK8sClient(t)
+				clientStatusMock := newMockStatusClient(t)
+				clientMock.EXPECT().Status().Return(clientStatusMock)
+				clientStatusMock.EXPECT().Patch(t.Context(), mock.Anything, mock.Anything).
+					Return(nil)
+				return &Controller{
+					secretManager: secretMock,
+					client:        clientMock,
+				}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 0,
+			wantErr:    assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.constructorFn(t)
+			status, err := c.rotateSaSecretFunc(tt.sare)(t.Context())
+			assert.Equal(t, tt.wantStatus, status)
+			tt.wantErr(t, err)
+		})
+	}
+}
