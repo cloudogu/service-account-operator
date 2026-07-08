@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- [#7] Process updates to `ServiceAccountRequest` and `ServiceAccountProducer` resources
+- [#7] Scheduled rotation of `ServiceAccountRequest` credentials
+
+### Changed
+- [#7] producer HTTP uses PUT and may return 204 No Content
+
 ## [v0.1.0] - 2026-06-19
 
 ### Added
