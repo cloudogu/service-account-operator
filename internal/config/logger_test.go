@@ -10,7 +10,7 @@ import (
 func TestConfigureLogger(t *testing.T) {
 	t.Run("configures controller-runtime logger with computed zap options", func(t *testing.T) {
 		t.Setenv(logLevelEnvVar, "debug")
-		overrideStageForTest(t, StageDevelopment)
+		overrideStageForTest(t, stageDevelopment)
 
 		oldSetLogger := setLogger
 		t.Cleanup(func() {
@@ -37,7 +37,7 @@ func TestConfigureLogger(t *testing.T) {
 func TestGetZapOptions(t *testing.T) {
 	t.Run("returns debug level and development mode when configured", func(t *testing.T) {
 		t.Setenv(logLevelEnvVar, "debug")
-		overrideStageForTest(t, StageDevelopment)
+		overrideStageForTest(t, stageDevelopment)
 
 		options := getZapOptions()
 
@@ -56,7 +56,7 @@ func TestGetZapOptions(t *testing.T) {
 		overrideLookupEnvForTest(t, func(string) (string, bool) {
 			return "", false
 		})
-		overrideStageForTest(t, StageProduction)
+		overrideStageForTest(t, stageProduction)
 
 		options := getZapOptions()
 
@@ -73,7 +73,7 @@ func TestGetZapOptions(t *testing.T) {
 
 	t.Run("returns info level when configured log level is invalid", func(t *testing.T) {
 		t.Setenv(logLevelEnvVar, "invalid")
-		overrideStageForTest(t, StageDevelopment)
+		overrideStageForTest(t, stageDevelopment)
 
 		options := getZapOptions()
 

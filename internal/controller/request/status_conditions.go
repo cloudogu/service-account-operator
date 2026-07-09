@@ -18,11 +18,23 @@ func producerNotFound(ctx context.Context, c client.Client, sare *serviceaccount
 }
 
 // serviceAccountReady records the created secret and sets ServiceAccountReady=True, persisting both in one patch.
-func serviceAccountReady(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, secretName string) error {
+func serviceAccountReady(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, secretName string, isRotation bool) error {
 	return setAndPersist(ctx, c, sare, func() {
 		sare.Status.SecretRef = &serviceaccountv2.LocalSecretRef{Name: secretName}
+		if isRotation {
+			sare.Status.LastRotation = metav1.Now()
+		}
 	}, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionTrue,
 		serviceaccountv2.ConditionReasonServiceAccountReadyCreated, "")
+}
+
+// serviceAccountNotReadyForRotation removes a previously created secret and sets ServiceAccountReady=false. The given
+// SARE will later be reconciled where the ready condition might be re-set to ready.
+func serviceAccountNotReadyForRotation(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest) error {
+	return setAndPersist(ctx, c, sare, func() {
+		sare.Status.SecretRef = nil // secret rotation is dealt by deleting a previous secret (if existing)
+	}, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
+		"SecretRotationInProgress", "")
 }
 
 // serviceAccountFailed sets ServiceAccountReady=False with the error message and persists the condition.

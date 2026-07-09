@@ -19,8 +19,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		resetFlagStateForTest(t, nil)
 		overrideLookupEnvForTest(t, func(key string) (string, bool) {
 			switch key {
-			case StageEnvVar:
-				return StageDevelopment, true
+			case stageEnvVar:
+				return stageDevelopment, true
 			default:
 				return "", false
 			}
@@ -50,8 +50,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		if got, want := err.Error(), "failed to read namespace: failed to get env var [NAMESPACE]: environment variable NAMESPACE must be set"; got != want {
 			t.Fatalf("NewOperatorConfig() error = %q, want %q", got, want)
 		}
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 
@@ -67,6 +67,19 @@ func TestNewOperatorConfig(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to read deletion timeout")
 	})
 
+	t.Run("should return error on error reading producer reconcile interval", func(t *testing.T) {
+		// given
+		t.Setenv(namespaceEnvVar, "testNamespace")
+		t.Setenv(deletionTimeoutEnvVar, "24h")
+
+		// when
+		_, err := NewOperatorConfig(testScheme)
+
+		// then
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to read producer reconcile interval")
+	})
+
 	t.Run("should use configured namespace and return controller options", func(t *testing.T) {
 		resetFlagStateForTest(t, []string{
 			"--metrics-bind-address=:9443",
@@ -75,9 +88,10 @@ func TestNewOperatorConfig(t *testing.T) {
 			"--metrics-secure=false",
 			"--enable-http2=true",
 		})
-		t.Setenv(StageEnvVar, StageDevelopment)
+		t.Setenv(stageEnvVar, stageDevelopment)
 		t.Setenv(namespaceEnvVar, "ecosystem")
 		t.Setenv(deletionTimeoutEnvVar, "24h")
+		t.Setenv(producerReconcileIntervalEnvVar, "10s")
 
 		oldStage := Stage
 		oldLog := log
@@ -92,6 +106,7 @@ func TestNewOperatorConfig(t *testing.T) {
 		logMock.EXPECT().Info(0, "starting in development mode").Return()
 		logMock.EXPECT().Info(0, "deploying the service-account-operator in namespace ecosystem").Return()
 		logMock.EXPECT().Info(0, "using deletion timeout 24h0m0s to avoid hanging resources").Return()
+		logMock.EXPECT().Info(0, "using producer reconcile interval 10s to periodically reconcile producers").Return()
 		log = logr.New(logMock)
 
 		actual, err := NewOperatorConfig(testScheme)
@@ -110,8 +125,8 @@ func TestNewOperatorConfig(t *testing.T) {
 		if !actual.ControllerOptions.LeaderElection {
 			t.Fatal("LeaderElection = false, want true")
 		}
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 }
@@ -122,12 +137,12 @@ func TestIsStageDevelopment(t *testing.T) {
 		Stage = oldStage
 	})
 
-	Stage = StageDevelopment
+	Stage = stageDevelopment
 	if !isStageDevelopment() {
 		t.Fatal("isStageDevelopment() = false, want true")
 	}
 
-	Stage = StageProduction
+	Stage = stageProduction
 	if isStageDevelopment() {
 		t.Fatal("isStageDevelopment() = true, want false")
 	}
@@ -191,7 +206,7 @@ func TestGetNamespace(t *testing.T) {
 
 func TestConfigureStage(t *testing.T) {
 	t.Run("should set stage to development", func(t *testing.T) {
-		t.Setenv(StageEnvVar, StageDevelopment)
+		t.Setenv(stageEnvVar, stageDevelopment)
 
 		oldStage := Stage
 		oldLog := log
@@ -208,13 +223,13 @@ func TestConfigureStage(t *testing.T) {
 
 		configureStage()
 
-		if Stage != StageDevelopment {
-			t.Fatalf("Stage = %q, want %q", Stage, StageDevelopment)
+		if Stage != stageDevelopment {
+			t.Fatalf("Stage = %q, want %q", Stage, stageDevelopment)
 		}
 	})
 
 	t.Run("should set stage to production when configured as production", func(t *testing.T) {
-		t.Setenv(StageEnvVar, StageProduction)
+		t.Setenv(stageEnvVar, stageProduction)
 
 		oldStage := Stage
 		oldLog := log
@@ -230,14 +245,14 @@ func TestConfigureStage(t *testing.T) {
 
 		configureStage()
 
-		if Stage != StageProduction {
-			t.Fatalf("Stage = %q, want %q", Stage, StageProduction)
+		if Stage != stageProduction {
+			t.Fatalf("Stage = %q, want %q", Stage, stageProduction)
 		}
 	})
 
 	t.Run("should fall back to production when stage env is missing", func(t *testing.T) {
 		overrideLookupEnvForTest(t, func(key string) (string, bool) {
-			if key == StageEnvVar {
+			if key == stageEnvVar {
 				return "", false
 			}
 			return lookupEnv(key)
@@ -256,11 +271,11 @@ func TestConfigureStage(t *testing.T) {
 		logMock.EXPECT().Error(mock.Anything, "error reading stage environment variable, using production").Return()
 		log = logr.New(logMock)
 
-		Stage = StageDevelopment
+		Stage = stageDevelopment
 		configureStage()
 
-		if Stage != StageProduction {
-			t.Fatalf("Stage = %q, want %q", Stage, StageProduction)
+		if Stage != stageProduction {
+			t.Fatalf("Stage = %q, want %q", Stage, stageProduction)
 		}
 	})
 }
@@ -356,6 +371,59 @@ func Test_getDeletionTimeout(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("getDeletionTimeout() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_getProducerReconcileInterval(t *testing.T) {
+	tests := []struct {
+		name        string
+		prepareTest func(t *testing.T)
+		want        time.Duration
+		wantErr     assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return error on missing env var",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(producerReconcileIntervalEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(producerReconcileIntervalEnvVar, oldEnv))
+				})
+				require.NoError(t, os.Unsetenv(producerReconcileIntervalEnvVar))
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to get env var [PRODUCER_RECONCILE_INTERVAL]")
+			},
+		},
+		{
+			name: "should return error on invalid env var value",
+			prepareTest: func(t *testing.T) {
+				oldEnv := os.Getenv(producerReconcileIntervalEnvVar)
+				t.Cleanup(func() {
+					require.NoError(t, os.Setenv(producerReconcileIntervalEnvVar, oldEnv))
+				})
+				t.Setenv(producerReconcileIntervalEnvVar, "invalid")
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to parse env var [PRODUCER_RECONCILE_INTERVAL] with value [invalid]")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.prepareTest != nil {
+				tt.prepareTest(t)
+			}
+
+			got, err := getProducerReconcileInterval()
+
+			if tt.wantErr != nil {
+				tt.wantErr(t, err, "getProducerReconcileInterval() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if got != tt.want {
+				t.Errorf("getProducerReconcileInterval() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

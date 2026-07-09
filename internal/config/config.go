@@ -9,20 +9,22 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
+// constants for tuning the operator behavior
 const (
-	StageDevelopment      = "development"
-	StageProduction       = "production"
-	StageEnvVar           = "STAGE"
-	namespaceEnvVar       = "NAMESPACE"
-	logLevelEnvVar        = "LOG_LEVEL"
-	deletionTimeoutEnvVar = "DELETION_TIMEOUT"
+	stageDevelopment                = "development"
+	stageProduction                 = "production"
+	stageEnvVar                     = "STAGE"
+	namespaceEnvVar                 = "NAMESPACE"
+	logLevelEnvVar                  = "LOG_LEVEL"
+	deletionTimeoutEnvVar           = "DELETION_TIMEOUT"
+	producerReconcileIntervalEnvVar = "PRODUCER_RECONCILE_INTERVAL"
 )
 
 var log = ctrl.Log.WithName("config")
-var Stage = StageProduction
+var Stage = stageProduction
 
 func isStageDevelopment() bool {
-	return Stage == StageDevelopment
+	return Stage == stageDevelopment
 }
 
 // OperatorConfig contains the runtime configuration required to start the operator.
@@ -36,6 +38,10 @@ type OperatorConfig struct {
 	// DeletionTimeout is the time to wait for a resource to be deleted before giving up.
 	// The default value is supplied by the values.yaml.
 	DeletionTimeout time.Duration
+
+	// ProducerReconcileInterval is the interval for periodic producer reconciliation.
+	// Setting this to 0 disables periodic reconciliation.
+	ProducerReconcileInterval time.Duration
 }
 
 // NewOperatorConfig builds the operator runtime configuration from environment and flags.
@@ -55,10 +61,17 @@ func NewOperatorConfig(scheme *runtime.Scheme) (*OperatorConfig, error) {
 	}
 	log.Info(fmt.Sprintf("using deletion timeout %s to avoid hanging resources", deletionTimeout))
 
+	producerReconcileInterval, err := getProducerReconcileInterval()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read producer reconcile interval: %w", err)
+	}
+	log.Info(fmt.Sprintf("using producer reconcile interval %s to periodically reconcile producers", producerReconcileInterval))
+
 	return &OperatorConfig{
-		Namespace:         namespace,
-		ControllerOptions: getControllerOptions(scheme, namespace),
-		DeletionTimeout:   deletionTimeout,
+		Namespace:                 namespace,
+		ControllerOptions:         getControllerOptions(scheme, namespace),
+		DeletionTimeout:           deletionTimeout,
+		ProducerReconcileInterval: producerReconcileInterval,
 	}, nil
 }
 
@@ -76,12 +89,26 @@ func getDeletionTimeout() (time.Duration, error) {
 	return deletionTimeoutDuration, nil
 }
 
+func getProducerReconcileInterval() (time.Duration, error) {
+	reconcileInterval, err := getEnvVar(producerReconcileIntervalEnvVar)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get env var [%s]: %w", producerReconcileIntervalEnvVar, err)
+	}
+
+	reconcileIntervalDuration, err := time.ParseDuration(reconcileInterval)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse env var [%s] with value [%s]: %w", producerReconcileIntervalEnvVar, reconcileInterval, err)
+	}
+
+	return reconcileIntervalDuration, nil
+}
+
 func configureStage() {
 	var err error
-	Stage, err = getEnvVar(StageEnvVar)
+	Stage, err = getEnvVar(stageEnvVar)
 	if err != nil {
 		log.Error(err, "error reading stage environment variable, using production")
-		Stage = StageProduction
+		Stage = stageProduction
 	}
 
 	if isStageDevelopment() {

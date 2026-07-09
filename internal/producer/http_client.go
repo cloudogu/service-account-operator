@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -18,15 +19,22 @@ const (
 	defaultTimeout30secs = 30 * time.Second
 )
 
-// Params is the list of parameters forwarded to the producer when creating a service account.
+// Params is the list of parameters forwarded to the producer when creating or updating a service account. These
+// parameters are usually optional, anyhow developers of Service Account consumers are strongly asked to check the
+// producers requirements.
 type Params map[string]string
+
+// BehaviorParams may be used to by a consumer (via their SARE) to trigger actions towards the Service Account producer.
+type BehaviorParams struct {
+	// RotateServiceAccountNow indicates if a Service Account's credential should be rotated immediately.
+	// This field must be ignored during the first creation of a Service Account (because there is nothing to rotate).
+	// This field is optional and defaults to false.
+	RotateServiceAccountNow bool `json:"rotateServiceAccountNow,omitempty"`
+}
 
 // ServiceAccountClient manages service accounts on a specific producer.
 type ServiceAccountClient interface {
-	// Create provisions a new service account and returns its credentials.
-	Create(ctx context.Context, consumer string, params Params) (map[string]string, error)
-	// Update re-provisions an existing service account and returns the refreshed credentials.
-	Update(ctx context.Context, consumer string, params Params) (map[string]string, error)
+	CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error)
 	// Delete removes a service account at the producer.
 	Delete(ctx context.Context, consumer string) error
 	// Ready returns nil when the producer endpoint is reachable
@@ -51,20 +59,29 @@ func NewHTTPClient(endpoint, apiKey string) *HttpClient {
 	}
 }
 
-type createRequestBody struct {
+type createOrUpdateRequestBody struct {
+	// Consumer contains the identifier of the Service Account Consumer. This field is required.
 	Consumer string `json:"consumer"`
-	Params   Params `json:"params,omitempty"`
+	// Params contains key/value parameters upon the producer modifies the service account creation/update. These
+	// parameters are usually optional, anyhow developers of Service Account consumers are strongly asked to check the
+	// producers requirements.
+	Params Params `json:"params,omitempty"`
+	// BehaviorParams contain information in which the Service Account producer may be triggered for an action. This field is strictly optional.
+	BehaviorParams BehaviorParams `json:"behaviorParams,omitzero"`
 }
 
+// Exists checks if any Service Account exists for the consumer and returns true if the Producer API indicates so.
 func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) {
 	targetURL, err := url.JoinPath(c.endpoint, consumer)
 	if err != nil {
 		return false, fmt.Errorf("failed to build URL for producer endpoint %q and consumer %q: %w", c.endpoint, consumer, err)
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
+
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	resp, err := c.client.Do(req)
@@ -88,33 +105,40 @@ func (c *HttpClient) Exists(ctx context.Context, consumer string) (bool, error) 
 	}
 }
 
-// Create calls a service account producer's API to create a service account for the given consumer and returns the credentials.
-func (c *HttpClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	body, err := json.Marshal(createRequestBody{Consumer: consumer, Params: params})
+// CreateOrUpdate calls a service account producer's API to idempotently modify a service account for the given consumer
+// and returns the credentials. The credential map may be nil if no change occurred.
+func (c *HttpClient) CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error) {
+	bodyObject := createOrUpdateRequestBody{Consumer: consumer, Params: params, BehaviorParams: behaviorParams}
+	body, err := json.Marshal(bodyObject)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		return nil, fmt.Errorf("failed to marshal service account request body for consumer %s: %w", consumer, err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP put request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP create-serviceaccount request to producer %q failed: %w", c.endpoint, err)
+		return nil, fmt.Errorf("http serviceaccount request to producer %q failed: %w", c.endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("producer %q rejected the request with 401 — check the API key in the auth secret", c.endpoint)
+		return nil, fmt.Errorf("producer %q rejected the request with %d; please check the API key in the SARE auth secret", c.endpoint, resp.StatusCode)
 	}
 
-	if resp.StatusCode != http.StatusCreated {
+	okayishStatusCodes := []int{http.StatusOK, http.StatusCreated, http.StatusNoContent}
+	if !slices.Contains(okayishStatusCodes, resp.StatusCode) {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("producer returned unexpected status %s for %q: %s", resp.Status, c.endpoint, string(respBody))
+		return nil, fmt.Errorf("producer returned unexpected status %s on update for %q: %s", resp.Status, c.endpoint, string(respBody))
+	}
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
 	}
 
 	var credentials map[string]string
@@ -123,11 +147,6 @@ func (c *HttpClient) Create(ctx context.Context, consumer string, params Params)
 	}
 
 	return credentials, nil
-}
-
-// Update is not yet implemented. The producer API requires a PUT endpoint that does not exist yet.
-func (c *HttpClient) Update(_ context.Context, _ string, _ Params) (map[string]string, error) {
-	panic("Update is not yet implemented — requires PUT endpoint on the producer side")
 }
 
 // Ready checks the producer endpoint for basic readiness and returns an error if the endpoint is unreachable or returns a 5xx status.

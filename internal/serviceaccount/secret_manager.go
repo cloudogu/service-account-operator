@@ -46,23 +46,23 @@ func resolveSecretName(sare *serviceaccountv2.ServiceAccountRequest) string {
 
 // Exists reports whether the target Secret for the given SARE already exists in the cluster and is owned by the SARE.
 // It returns ErrSecretConflict if the secret exists but is not owned by this SARE (no owner or a different owner).
-func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error) {
+func (sm *SecretManager) Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (exists bool, secretName string, err error) {
 	name := resolveSecretName(sare)
 	var secret corev1.Secret
-	err := sm.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: name}, &secret)
+	err = sm.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: name}, &secret)
 	if err == nil {
 		if metav1.IsControlledBy(&secret, sare) {
-			return true, nil
+			return true, name, nil
 		}
 
-		return false, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, ErrSecretConflict)
+		return false, name, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, ErrSecretConflict)
 	}
 
 	if apierrors.IsNotFound(err) {
-		return false, nil
+		return false, name, nil
 	}
 
-	return false, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, err)
+	return false, name, fmt.Errorf("failed to check for existing secret %q for service account request %q: %w", name, sare.Name, err)
 }
 
 // CreateOrUpdate creates or updates the Kubernetes Secret for the given SARE with the provided credentials.
