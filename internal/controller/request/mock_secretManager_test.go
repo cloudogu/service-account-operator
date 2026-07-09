@@ -80,8 +80,55 @@ func (_c *mockSecretManager_CreateOrUpdate_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// Delete provides a mock function with given fields: ctx, sare
+func (_m *mockSecretManager) Delete(ctx context.Context, sare *v2.ServiceAccountRequest) error {
+	ret := _m.Called(ctx, sare)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Delete")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) error); ok {
+		r0 = rf(ctx, sare)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// mockSecretManager_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
+type mockSecretManager_Delete_Call struct {
+	*mock.Call
+}
+
+// Delete is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sare *v2.ServiceAccountRequest
+func (_e *mockSecretManager_Expecter) Delete(ctx interface{}, sare interface{}) *mockSecretManager_Delete_Call {
+	return &mockSecretManager_Delete_Call{Call: _e.mock.On("Delete", ctx, sare)}
+}
+
+func (_c *mockSecretManager_Delete_Call) Run(run func(ctx context.Context, sare *v2.ServiceAccountRequest)) *mockSecretManager_Delete_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v2.ServiceAccountRequest))
+	})
+	return _c
+}
+
+func (_c *mockSecretManager_Delete_Call) Return(_a0 error) *mockSecretManager_Delete_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *mockSecretManager_Delete_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest) error) *mockSecretManager_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Exists provides a mock function with given fields: ctx, sare
-func (_m *mockSecretManager) Exists(ctx context.Context, sare *v2.ServiceAccountRequest) (bool, error) {
+func (_m *mockSecretManager) Exists(ctx context.Context, sare *v2.ServiceAccountRequest) (bool, string, error) {
 	ret := _m.Called(ctx, sare)
 
 	if len(ret) == 0 {
@@ -89,8 +136,9 @@ func (_m *mockSecretManager) Exists(ctx context.Context, sare *v2.ServiceAccount
 	}
 
 	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) (bool, error)); ok {
+	var r1 string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) (bool, string, error)); ok {
 		return rf(ctx, sare)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) bool); ok {
@@ -99,13 +147,19 @@ func (_m *mockSecretManager) Exists(ctx context.Context, sare *v2.ServiceAccount
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest) string); ok {
 		r1 = rf(ctx, sare)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(string)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, *v2.ServiceAccountRequest) error); ok {
+		r2 = rf(ctx, sare)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // mockSecretManager_Exists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exists'
@@ -127,12 +181,12 @@ func (_c *mockSecretManager_Exists_Call) Run(run func(ctx context.Context, sare 
 	return _c
 }
 
-func (_c *mockSecretManager_Exists_Call) Return(_a0 bool, _a1 error) *mockSecretManager_Exists_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *mockSecretManager_Exists_Call) Return(exists bool, secretName string, err error) *mockSecretManager_Exists_Call {
+	_c.Call.Return(exists, secretName, err)
 	return _c
 }
 
-func (_c *mockSecretManager_Exists_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest) (bool, error)) *mockSecretManager_Exists_Call {
+func (_c *mockSecretManager_Exists_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest) (bool, string, error)) *mockSecretManager_Exists_Call {
 	_c.Call.Return(run)
 	return _c
 }

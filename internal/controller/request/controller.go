@@ -4,64 +4,83 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
+	"github.com/cloudogu/service-account-operator/internal/config"
+	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	"github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
+	"github.com/go-logr/logr"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
-
-// secretManager manages the Kubernetes Secret that holds a service account's credentials.
-type secretManager interface {
-	Exists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (bool, error)
-	CreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, credentials map[string]string) (string, error)
-}
-
-// producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
-// resolving the API key from the referenced Kubernetes Secret.
-type producerClientFactory interface {
-	NewForProducer(ctx context.Context, namespace string, sapr *serviceaccountv2.ServiceAccountProducer) (producer.ServiceAccountClient, error)
-}
-
-// serviceAccountClient manages service accounts on a specific producer.
-// Defined here for mock generation
-type serviceAccountClient interface { //nolint:unused
-	producer.ServiceAccountClient
-}
+const (
+	finalizer = "k8s.cloudogu.com/service-account-request-finalizer"
+)
 
 // Controller reconciles ServiceAccountRequest resources.
 type Controller struct {
-	client                client.Client
+	client                k8sClient
 	secretManager         secretManager
 	producerClientFactory producerClientFactory
+	operatorConfig        *config.OperatorConfig
+	eventRecorder         eventRecorder
+	cronTaskFactory       taskRunnerFactory
+	rotateCronWatcher     map[string]cron.TaskRunner
 }
 
-func New(rtClient client.Client, scheme *runtime.Scheme) *Controller {
+type defaultCronTaskFactory struct{}
+
+func (d *defaultCronTaskFactory) New(ctx context.Context, expr string, jobClosure cron.JobFunc) (cron.TaskRunner, error) {
+	return cron.New(ctx, expr, jobClosure)
+}
+
+func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) (controller *Controller, cleanup func()) {
+	runners := make(map[string]cron.TaskRunner)
 	return &Controller{
-		client:                rtClient,
-		secretManager:         sa.NewSecretManager(rtClient, scheme),
-		producerClientFactory: producer.NewClientFactory(rtClient),
-	}
+			client:                rtClient,
+			secretManager:         sa.NewSecretManager(rtClient, scheme),
+			producerClientFactory: producer.NewClientFactory(rtClient),
+			operatorConfig:        operatorConfig,
+			eventRecorder:         eventRecorder,
+			cronTaskFactory:       new(defaultCronTaskFactory),
+			rotateCronWatcher:     runners,
+		}, func() {
+			for _, runner := range runners {
+				runner.Stop()
+			}
+		}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", req.Name)
 
 	var sare serviceaccountv2.ServiceAccountRequest
-	if err := c.client.Get(ctx, req.NamespacedName, &sare); err != nil {
+	if err := c.client.Get(ctx, req.NamespacedName, &sare); apierrors.IsNotFound(err) {
+		logger.Info("service account request not found, skipping reconcile")
+
+		return ctrl.Result{}, nil
+	} else if err != nil {
 		logger.Error(err, "failed to get service account request")
 
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, fmt.Errorf("failed to get service account request %q: %w", req.Name, err)
 	}
 
 	if !sare.DeletionTimestamp.IsZero() {
@@ -79,71 +98,157 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Update refreshes sare's resourceVersion in place, so we continue reconciling in the same pass.
 	}
 
-	exists, err := c.secretManager.Exists(ctx, &sare)
-	if err != nil {
-		if errors.Is(err, sa.ErrSecretConflict) {
-			return ctrl.Result{}, c.fail(ctx, &sare, err)
-		}
-
-		logger.Error(err, "failed to check if service account secret exists")
-
-		return ctrl.Result{}, fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
-	}
-
-	if exists {
-		logger.Info("service account request needs to be updated")
-
-		return c.reconcileUpdate(ctx, &sare)
-	}
-
-	logger.Info("service account request needs to be created")
-
-	return c.reconcileCreate(ctx, &sare)
+	return c.reconcileCreateOrUpdate(ctx, &sare)
 }
 
-// TODO(open question): When an optional service account is created only after the consumer has
+// TODO: When an optional service account is created only after the consumer has
 // already started (the consumer came up without it), the consumer may not pick up the new
 // credentials until it is restarted. Decide whether this operator should trigger a consumer
 // restart (e.g. annotate/roll the consumer's Deployment) or whether the consumer is expected to
 // reload credentials on its own. Pending product decision before implementing.
+//
+// See cloudogu/service-account-operator#8
 
-func (c *Controller) reconcileCreate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
-
-	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
+	secretName, isRotation, abort, err := c.createOrUpdate(ctx, sare)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if sare.Spec.Optional {
-				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
-				return ctrl.Result{}, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
-			}
-
-			return ctrl.Result{}, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
-		}
-
-		return ctrl.Result{}, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+		return ctrl.Result{}, c.fail(ctx, sare, err)
+	} else if abort {
+		return ctrl.Result{}, nil
 	}
 
-	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err))
-	}
-
-	credentials, err := saClient.Create(ctx, qualifiedConsumer(sare), sare.Spec.Params)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to create service account at producer %q: %w", sapr.Name, err))
-	}
-
-	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
-	if err != nil {
-		return ctrl.Result{}, c.fail(ctx, sare, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err))
-	}
-
-	if err := serviceAccountReady(ctx, c.client, sare, secretName); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create for %q: %w", sare.Name, err)
+	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (secretName string, isRotation bool, abort bool, err error) {
+	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+
+	secretExists, secretName, err := c.checkSecretExists(ctx, sare, logger)
+	if err != nil {
+		return "", false, true, err
+	}
+
+	createOrUpdateString := createdOrUpdated(secretExists)
+	logger.Info("service account request needs to be " + createOrUpdateString)
+
+	err = c.handleSaRotationWatcher(ctx, sare)
+	if err != nil {
+		return "", false, true, err
+	}
+
+	sapr, abort, err := c.getProducerForCreateOrUpdate(ctx, sare, logger)
+	if abort || err != nil {
+		return "", false, true, err
+	}
+
+	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
+	if err != nil {
+		return "", false, true, err
+	}
+
+	isRotation = credentials != nil
+	if isRotation {
+		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+		if err != nil {
+			return "", false, true, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
+		}
+
+		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
+		c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
+	} else {
+		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
+	}
+
+	return secretName, isRotation, false, nil
+}
+
+func (c *Controller) getProducerForCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (sapr *serviceaccountv2.ServiceAccountProducer, abort bool, err error) {
+	sapr, err = c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("producer not found, deleting any secrets that might have been created for this request", "producer", sare.Spec.Producer)
+			deleteErr := c.secretManager.Delete(ctx, sare)
+			if deleteErr != nil {
+				return nil, true, fmt.Errorf("failed to delete service account secret of deleted producer %q: %w", sapr.Name, deleteErr)
+			}
+
+			if sare.Spec.Optional {
+				logger.Info("optional producer not found, skipping until producer is created", "producer", sare.Spec.Producer)
+				return nil, true, producerNotFound(ctx, c.client, sare, sare.Spec.Producer, err)
+			}
+
+			return nil, true, fmt.Errorf("required producer %q not found: %w", sare.Spec.Producer, err)
+		}
+
+		return nil, true, fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	}
+	return sapr, false, nil
+}
+
+func (c *Controller) checkSecretExists(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (bool, string, error) {
+	secretExists, secretName, err := c.secretManager.Exists(ctx, sare)
+	if err != nil {
+		if errors.Is(err, sa.ErrSecretConflict) {
+			return false, "", err
+		}
+
+		logger.Error(err, "failed to check if service account secret exists")
+
+		return false, "", fmt.Errorf("failed to check if service account secret exists for %q: %w", sare.Name, err)
+	}
+	return secretExists, secretName, nil
+}
+
+func createdOrUpdated(secretExists bool) string {
+	createOrUpdateString := "created"
+	if secretExists {
+		createOrUpdateString = "updated"
+	}
+	return createOrUpdateString
+}
+
+func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build HTTP client for producer %q: %w", sapr.Name, err)
+	}
+
+	behaviorParams := producer.BehaviorParams{}
+	if !secretExists {
+		behaviorParams.RotateServiceAccountNow = true
+	}
+
+	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err)
+	}
+
+	return credentials, nil
+}
+
+func (c *Controller) handleSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	if sare.Spec.Rotation != nil && sare.Spec.Rotation.Enabled {
+		err := c.setSaRotationWatcher(ctx, sare)
+		if err != nil {
+			return fmt.Errorf("failed to replace service account rotation expression: %w", err)
+		}
+	} else {
+		c.deleteSaRotationWatcher(sare)
+	}
+	return nil
+}
+
+func (c *Controller) getServiceAccountClient(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (serviceAccountClient, error) {
+	saClient, err := c.producerClientFactory.NewForProducer(ctx, sare.Namespace, sapr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service account client for producer %q: %w", sapr.Name, err)
+	}
+
+	return saClient, nil
 }
 
 // fail records a failed ServiceAccountReady condition and returns the original
@@ -157,16 +262,99 @@ func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAcc
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	c.deleteSaRotationWatcher(sare)
+
 	if !controllerutil.ContainsFinalizer(sare, finalizer) {
 		return nil
 	}
 
-	// TODO Persistent error during service account deletion freezes the cr. This could be annoying during cleanups.
-	if err := c.deleteServiceAccount(ctx, sare); err != nil {
-		return err
+	if time.Since(sare.DeletionTimestamp.Time) > c.operatorConfig.DeletionTimeout {
+		logf.FromContext(ctx).Info("deletion timeout reached, dropping finalizer to avoid hanging resource", "serviceAccountRequest", sare.Name)
+		return c.removeFinalizer(ctx, sare)
 	}
+
+	if err := c.deleteServiceAccount(ctx, sare); err != nil {
+		wrapErr := fmt.Errorf("failed to delete service account for %q: %w", sare.Name, err)
+		return c.fail(ctx, sare, wrapErr)
+	}
+
+	return c.removeFinalizer(ctx, sare)
+}
+
+func (c *Controller) deleteSaRotationWatcher(sare *serviceaccountv2.ServiceAccountRequest) {
+	sareName := namespacedName(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
+		cronWatcher.Stop()
+		delete(c.rotateCronWatcher, sareName)
+	}
+}
+
+// rotateSaSecretFunc produces a function that relies on deleting the secret of a consumer.
+// This works because we watch the secret for deletion.
+// If the deletion is detected, an update to the SA is issued against the producer.
+func (c *Controller) rotateSaSecretFunc(sare *serviceaccountv2.ServiceAccountRequest) func(ctx context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
+		logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
+
+		exists, secretName, err := c.secretManager.Exists(ctx, sare)
+		if err != nil {
+			return 1, fmt.Errorf("failed to check if secret %q exists for service account request %q during rotation: %w", secretName, sare.Name, err)
+		}
+
+		if !exists {
+			logger.Info("service account secret does not exist, skipping rotation", "secret", secretName)
+			return 0, nil
+		}
+
+		logger.Info("rotating service account by deleting secret", "secret", secretName)
+
+		err = serviceAccountNotReadyForRotation(ctx, c.client, sare)
+		if err != nil {
+			logger.Error(err, "failed to update status conditions before service account rotation")
+		}
+
+		err = c.secretManager.Delete(ctx, sare)
+		if err != nil {
+			// currently, the gronx tasker uses the return code for debugging the gronx task.
+			return 1, fmt.Errorf("failed to delete secret %q for service account request %q during rotation: %w", secretName, sare.Name, err)
+		}
+
+		return 0, nil
+	}
+}
+
+func (c *Controller) setSaRotationWatcher(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (err error) {
+	sareName := namespacedName(sare)
+	if cronWatcher, ok := c.rotateCronWatcher[sareName]; ok {
+		cronWatcher.Stop()
+	}
+
+	cronWatcher, err := c.cronTaskFactory.New(ctx, sare.Spec.Rotation.Rotation, c.rotateSaSecretFunc(sare))
+	if err != nil {
+		return fmt.Errorf("failed to set cron watcher for SARE %q: %w", sareName, err)
+	}
+
+	go func() {
+		// stop is done either on replace or through the cleanup function of the controller.
+		cronWatcher.Run()
+	}()
+
+	c.rotateCronWatcher[sareName] = cronWatcher
+
+	return nil
+}
+
+func (c *Controller) removeFinalizer(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
+	if !controllerutil.ContainsFinalizer(sare, finalizer) {
+		return nil
+	}
+
 	controllerutil.RemoveFinalizer(sare, finalizer)
 	if err := c.client.Update(ctx, sare); err != nil {
+		// Prevent resource not found error produced by informer cache lag.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to remove finalizer from service account request %q: %w", sare.Name, err)
 	}
 
@@ -174,13 +362,53 @@ func (c *Controller) reconcileDelete(ctx context.Context, sare *serviceaccountv2
 }
 
 func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error {
-	logf.FromContext(ctx).Info("delete not yet implemented, skipping", "serviceAccountRequest", sare.Name)
-	return nil
-}
+	logger := logf.FromContext(ctx)
+	logger.Info("deleting service account", "serviceAccount", sare.Spec.Consumer)
 
-func (c *Controller) reconcileUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	logf.FromContext(ctx).Info("update not yet implemented, skipping", "serviceAccountRequest", sare.Name)
-	return ctrl.Result{}, nil
+	// explicitly deleting the secret would cause unnecessary reconciliation
+	// the secret is deleted via the controller reference anyway
+
+	sapr, err := c.getProducer(ctx, sare.Namespace, sare.Spec.Producer)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("producer not found, skipping deletion of service account at producer", "producer", sare.Spec.Producer, "request", sare.Name)
+			return nil
+		}
+
+		return fmt.Errorf("failed to get producer %q: %w", sare.Spec.Producer, err)
+	}
+
+	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
+	if err != nil {
+		return err
+	}
+
+	consumer := qualifiedConsumer(sare)
+	exists, err := saClient.Exists(ctx, consumer)
+	if err != nil {
+		return fmt.Errorf("failed to check if service account %q exists at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
+	}
+
+	if !exists {
+		logger.Info("service account not found at producer, skipping deletion", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+		return nil
+	}
+
+	err = saClient.Delete(ctx, consumer)
+	if err != nil {
+		return fmt.Errorf("failed to delete service account %q at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
+	}
+	logger.Info("deleted service account", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+
+	original := sapr.DeepCopy()
+	sapr.Status.LastExecution = metav1.NewTime(time.Now())
+	err = c.client.Status().Patch(ctx, sapr, client.MergeFrom(original))
+	if err != nil {
+		logger.Error(err, "failed to patch lastExecution status after successful delete", "serviceAccount", sare.Spec.Consumer, "producer", sapr.Name)
+	}
+
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountDeleted", "Deleted service account %q", sare.Spec.Consumer)
+	return nil
 }
 
 func (c *Controller) getProducer(ctx context.Context, namespace, producerName string) (*serviceaccountv2.ServiceAccountProducer, error) {
@@ -194,13 +422,52 @@ func (c *Controller) getProducer(ctx context.Context, namespace, producerName st
 
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&serviceaccountv2.ServiceAccountRequest{}).
+		For(&serviceaccountv2.ServiceAccountRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&corev1.Secret{}, builder.WithPredicates(wasDeletedPredicate())).
 		Watches(
 			&serviceaccountv2.ServiceAccountProducer{},
 			handler.EnqueueRequestsFromMapFunc(c.enqueueRequestsForProducer),
+			builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, producerGotReadyPredicate())),
 		).
 		Named("serviceaccountrequest").
 		Complete(c)
+}
+
+func producerGotReadyPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+			producerOld, ok := e.ObjectOld.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerOld == nil {
+				return false
+			}
+
+			producerNew, ok := e.ObjectNew.(*serviceaccountv2.ServiceAccountProducer)
+			if !ok || producerNew == nil {
+				return false
+			}
+
+			oldConditionNotReady := meta.IsStatusConditionFalse(producerOld.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			newConditionReady := meta.IsStatusConditionTrue(producerNew.Status.Conditions, serviceaccountv2.ConditionTypeReady)
+			return oldConditionNotReady && newConditionReady
+		},
+	}
+}
+
+func wasDeletedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(event.TypedCreateEvent[client.Object]) bool {
+			return false
+		},
+		DeleteFunc: func(event.TypedDeleteEvent[client.Object]) bool {
+			return true
+		},
+		UpdateFunc: func(event.TypedUpdateEvent[client.Object]) bool {
+			return false
+		},
+		GenericFunc: func(event.TypedGenericEvent[client.Object]) bool {
+			return false
+		},
+	}
 }
 
 // enqueueRequestsForProducer maps a ServiceAccountProducer event to all SAREs in the same
@@ -231,4 +498,12 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 // For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
 func qualifiedConsumer(sare *serviceaccountv2.ServiceAccountRequest) string {
 	return sare.Spec.Consumer + "-" + sare.Namespace
+}
+
+// namespacedName returns a namespace-qualified SARE name to ensure uniqueness across namespaces. The resource name's
+// uniqueness is itself enforced by Helm, so overwriting other consumer's SAREs are avoided this way.
+//
+// For example, a consumer "grafana-prometheus-sa" in namespace "ecosystem" becomes "grafana-prometheus-sa-ecosystem".
+func namespacedName(sare *serviceaccountv2.ServiceAccountRequest) string {
+	return sare.Name + "-" + sare.Namespace
 }

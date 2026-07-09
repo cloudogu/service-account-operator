@@ -8,47 +8,41 @@ import (
 	"time"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
+	"github.com/cloudogu/service-account-operator/internal/config"
+	"github.com/cloudogu/service-account-operator/internal/controller/request/cron"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
 	sa "github.com/cloudogu/service-account-operator/internal/serviceaccount"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
-var testCtx = context.Background()
+const (
+	testNamespace         = "ecosystem"
+	testReqName           = "grafana"
+	testPrName            = "prometheus"
+	testConsumer          = "grafana"
+	testQualifiedConsumer = "grafana-ecosystem"
+)
 
-var testSare = serviceaccountv2.ServiceAccountRequest{
-	ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
-	Spec: serviceaccountv2.ServiceAccountRequestSpec{
-		Consumer:     "grafana",
-		ConsumerType: serviceaccountv2.DoguConsumerType,
-		Producer:     "prometheus",
-	},
-}
-
-var testSapr = serviceaccountv2.ServiceAccountProducer{
-	ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
-	Spec: serviceaccountv2.ServiceAccountProducerSpec{
-		Producer: "prometheus",
-		HTTP: &serviceaccountv2.HTTPProducer{
-			Endpoint: "http://prometheus:9090/serviceaccounts",
-			AuthSecret: serviceaccountv2.ServiceAccountProducerAuthSecret{
-				LocalSecretRef: serviceaccountv2.LocalSecretRef{Name: "prometheus-sa-secret"},
-				Key:            "apiKey",
-			},
-		},
-	},
-}
+var (
+	testCtx        = context.Background()
+	testSecretName = "grafana-prom-sa"
+	testCron02am   = "0 2 * * *"
+)
 
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
@@ -62,38 +56,72 @@ func reconcileRequest(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}}
 }
 
-func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccountRequest, scheme *runtime.Scheme, t *testing.T) *corev1.Secret {
-	t.Helper()
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-	}
-	if err := controllerutil.SetControllerReference(owner, secret, scheme); err != nil {
-		t.Fatalf("SetControllerReference() error: %v", err)
-	}
-	return secret
-}
-
 func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
 	return apimeta.FindStatusCondition(conditions, condType)
 }
 
-func matchSARE(sare serviceaccountv2.ServiceAccountRequest) any {
+func matchSARE(sare *serviceaccountv2.ServiceAccountRequest) any {
 	return mock.MatchedBy(func(s *serviceaccountv2.ServiceAccountRequest) bool {
 		return s != nil && s.Name == sare.Name
 	})
 }
 
-func matchSAPR(sapr serviceaccountv2.ServiceAccountProducer) any {
+type fakeEventRecorder struct {
+	*events.FakeRecorder
+}
+
+func newFakeRecorder(t *testing.T, expectedEvents []string) events.EventRecorder {
+	t.Helper()
+	recorder := fakeEventRecorder{events.NewFakeRecorder(len(expectedEvents) + 1)}
+	t.Cleanup(func() {
+		recorder.drainAndAssertExpected(t, expectedEvents)
+	})
+	return recorder
+}
+
+func (f *fakeEventRecorder) drainAndAssertExpected(t *testing.T, expectedEvents []string) {
+	t.Helper()
+	for _, expected := range expectedEvents {
+		select {
+		case actual := <-f.Events:
+			assert.Equal(t, expected, actual)
+		default:
+			assert.Fail(t, "less than the expected number of events were recorded")
+			return
+		}
+	}
+
+	var recordedEvents []string
+	defer func() {
+		if len(recordedEvents) > 0 {
+			assert.Failf(t, "more than the expected number of events were recorded", "Events: %s", recordedEvents)
+		}
+	}()
+	for {
+		select {
+		case actual := <-f.Events:
+			recordedEvents = append(recordedEvents, actual)
+		default:
+			return
+		}
+	}
+}
+
+func matchSAPR(sapr *serviceaccountv2.ServiceAccountProducer) any {
 	return mock.MatchedBy(func(p *serviceaccountv2.ServiceAccountProducer) bool {
 		return p != nil && p.Name == sapr.Name
 	})
 }
 
+var testOperatorConfig = &config.OperatorConfig{}
+
 func TestController_Reconcile(t *testing.T) {
 	t.Run("should ignore not found SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("missing", "ecosystem"))
 
@@ -101,11 +129,29 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, ctrl.Result{}, result)
 	})
 
+	t.Run("should fail on error when getting SARE", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return assert.AnError
+			}}).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("get-error", "ecosystem"))
+
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to get service account request \"get-error\"")
+		assert.Equal(t, ctrl.Result{}, result)
+	})
+
 	t.Run("should add finalizer when missing and continue reconciling in the same pass", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createTestSare()).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		// The required producer is missing, so reconcile proceeds past the finalizer step and errors out.
 		// This proves the finalizer addition no longer short-circuits the pass.
@@ -119,12 +165,13 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should remove finalizer when SARE is being deleted", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		now := metav1.NewTime(time.Now())
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sare.DeletionTimestamp = &now
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		sare.DeletionTimestamp = new(metav1.NewTime(time.Now()))
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -139,45 +186,16 @@ func TestController_Reconcile(t *testing.T) {
 		}
 	})
 
-	t.Run("should skip reconcile when target secret already exists in cluster", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := testSare
-		sare.Finalizers = []string{finalizer}
-		existingSecret := newOwnedSecret("grafana-to-prometheus", "ecosystem", &sare, scheme, t)
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare, existingSecret).Build()
-		factoryMock := newMockProducerClientFactory(t)
-		controller := New(rtClient, scheme)
-		controller.producerClientFactory = factoryMock
-
-		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.NoError(t, err)
-		assert.Equal(t, ctrl.Result{}, result)
-	})
-
-	t.Run("should skip reconcile when custom secretRef target already exists in cluster", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		sare := testSare
-		sare.Finalizers = []string{finalizer}
-		sare.Spec.SecretRef = &serviceaccountv2.LocalSecretRef{Name: "custom-secret"}
-		existingSecret := newOwnedSecret("custom-secret", "ecosystem", &sare, scheme, t)
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare, existingSecret).Build()
-		controller := New(rtClient, scheme)
-
-		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
-
-		require.NoError(t, err)
-		assert.Equal(t, ctrl.Result{}, result)
-	})
-
 	t.Run("should return wrapped error when secretManager.Exists fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, errors.New("storage error"))
-		controller := New(rtClient, scheme)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, errors.New("storage error"))
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.secretManager = secretMgrMock
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -189,17 +207,19 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return ErrSecretConflict and set ServiceAccountReady=False when secret exists but is not owned by this SARE", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare).
+			WithObjects(sare).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		secretMgrMock := newMockSecretManager(t)
 		conflictErr := fmt.Errorf("%w: secret %q in namespace %q", sa.ErrSecretConflict, "grafana-to-prometheus", "ecosystem")
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, conflictErr)
-		controller := New(rtClient, scheme)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, conflictErr)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.secretManager = secretMgrMock
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -216,15 +236,17 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return empty result and set ServiceAccountReady=False with ProducerNotFound reason for optional SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
 		sare.Spec.Optional = true
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare).
+			WithObjects(sare).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -241,10 +263,12 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error for required SARE when producer is not found", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -253,19 +277,20 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error and set ServiceAccountReady=False when factory fails to build client", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).
 			Return(nil, errors.New("auth secret not found"))
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -281,20 +306,21 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error and set ServiceAccountReady=False when HTTP client fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).Return(nil, errors.New("connection refused"))
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, errors.New("connection refused"))
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
-		controller := New(rtClient, scheme)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -309,17 +335,18 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when adding finalizer fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare).
+			WithObjects(createTestSare()).
 			WithInterceptorFuncs(interceptor.Funcs{
 				Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
 					return errors.New("etcd unavailable")
 				},
 			}).
 			Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -329,11 +356,11 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when getProducer fails with a non-not-found error", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare).
+			WithObjects(sare).
 			WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 					if _, ok := obj.(*serviceaccountv2.ServiceAccountProducer); ok {
@@ -343,7 +370,9 @@ func TestController_Reconcile(t *testing.T) {
 				},
 			}).
 			Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -353,24 +382,25 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error and set ServiceAccountReady=False when secret storage fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
-		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(createTestSare()), map[string]string{"key": "val"}).
 			Return("", errors.New("disk full"))
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
 
@@ -387,12 +417,11 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return original error when fail() cannot update the status condition", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
@@ -401,9 +430,11 @@ func TestController_Reconcile(t *testing.T) {
 			}).
 			Build()
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).
 			Return(nil, errors.New("auth secret not found"))
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
@@ -414,12 +445,11 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when serviceAccountReady status update fails after successful create", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
@@ -428,14 +458,16 @@ func TestController_Reconcile(t *testing.T) {
 			}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
-		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"key": "val"}).Return("grafana-to-prometheus", nil)
-		controller := New(rtClient, scheme)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(createTestSare()), map[string]string{"key": "val"}).Return("grafana-to-prometheus", nil)
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
 
@@ -447,12 +479,13 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return nil when SARE is being deleted but does not carry the correct finalizer", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		now := metav1.NewTime(time.Now())
-		sare := testSare
-		sare.DeletionTimestamp = &now
+		sare := createTestSare()
+		sare.DeletionTimestamp = new(metav1.NewTime(time.Now()))
 		sare.Finalizers = []string{"some-other-controller/finalizer"} // fake client requires at least one finalizer when DeletionTimestamp is set
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -462,20 +495,21 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should return error when removing finalizer fails", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		now := metav1.NewTime(time.Now())
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sare.DeletionTimestamp = &now
+		sare.DeletionTimestamp = new(metav1.NewTime(time.Now()))
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare).
+			WithObjects(sare).
 			WithInterceptorFuncs(interceptor.Funcs{
 				Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
 					return errors.New("update denied")
 				},
 			}).
 			Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
 		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
 
@@ -485,26 +519,27 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should forward spec.params to the producer Create call", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
 		sare.Spec.Params = map[string]string{"readOnly": "true", "scrapeInterval": "30s"}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
 		httpClientMock.EXPECT().
-			Create(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}).
+			CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}, producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"apiKey": "abc"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
-		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"apiKey": "abc"}).Return("grafana-to-prometheus", nil)
-		controller := New(rtClient, scheme)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(createTestSare()), map[string]string{"apiKey": "abc"}).Return("grafana-to-prometheus", nil)
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
 
@@ -515,25 +550,26 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should create secret and update status with Ready conditions on success", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Finalizers = []string{finalizer}
-		sapr := testSapr
 		rtClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&sare, &sapr).
+			WithObjects(sare, createTestSapr()).
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().Create(testCtx, "grafana-ecosystem", producerclient.Params(nil)).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
-		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(testSapr)).Return(httpClientMock, nil)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 
 		secretMgrMock := newMockSecretManager(t)
-		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(testSare)).Return(false, nil)
-		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(testSare), map[string]string{"username": "grafana-user", "password": "pass"}).Return("grafana-to-prometheus", nil)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(createTestSare()), map[string]string{"username": "grafana-user", "password": "pass"}).Return("grafana-to-prometheus", nil)
 
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 		controller.producerClientFactory = factoryMock
 		controller.secretManager = secretMgrMock
 
@@ -552,24 +588,279 @@ func TestController_Reconcile(t *testing.T) {
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
 	})
+	t.Run("should successfully set rotation watcher if rotation is enabled", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestSare()
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Rotation.Enabled = true
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(createTestSare()), map[string]string{"username": "grafana-user", "password": "pass"}).Return("grafana-to-prometheus", nil)
+
+		runCalledCh := make(chan struct{})
+		taskMock := newMockTaskRunner(t)
+		taskMock.EXPECT().Run().Run(func() {
+			close(runCalledCh)
+		}).Return()
+		taskMock.EXPECT().Stop().Return()
+		cronFactoryMock := newMockTaskRunnerFactory(t)
+		cronFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(taskMock, nil)
+
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"grafana\""})
+		controller, cleanupAndStop := New(rtClient, scheme, testOperatorConfig, recorder)
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = cronFactoryMock
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+		cleanupAndStop()
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
+
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
+		assertChannelReturnsWithTimeout(t, runCalledCh)
+	})
+	t.Run("should error on setting rotation watcher if cron syntax is invalid", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestSare()
+		sare.Finalizers = []string{finalizer}
+		sare.Spec.Rotation.Enabled = true
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		factoryMock := newMockProducerClientFactory(t)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, testSecretName, nil)
+
+		cronFactoryMock := newMockTaskRunnerFactory(t)
+		cronFactoryMock.EXPECT().New(testCtx, "0 2 * * *", mock.Anything).Return(nil, assert.AnError)
+
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = cronFactoryMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to replace service account rotation expression")
+		assert.ErrorContains(t, err, "failed to set cron watcher for SARE \"grafana-to-prometheus-ecosystem\"")
+	})
+
+	t.Run("should not update secret if the credentials did not change", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(createTestSare())).Return(false, sare.Name, nil)
+
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.cronTaskFactory = newMockTaskRunnerFactory(t)
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("grafana-to-prometheus", "ecosystem"))
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "grafana-to-prometheus", Namespace: "ecosystem"}, &updated))
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "grafana-to-prometheus", updated.Status.SecretRef.Name)
+
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
+	})
+}
+
+func TestController_deleteSaRotationWatcher(t *testing.T) {
+	t.Run("should delete nothing if the watcher does not contain consumer", func(t *testing.T) {
+		// given
+		sare := createTestSare()
+		consumerName := namespacedName(sare)
+
+		sut := Controller{rotateCronWatcher: make(map[string]cron.TaskRunner)}
+
+		// when
+		sare.Spec.Rotation.Enabled = true
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		sut.deleteSaRotationWatcher(sare)
+
+		// then
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+	})
+
+	t.Run("should remove consumer from watcher map", func(t *testing.T) {
+		// given
+		taskRunnerMock := newMockTaskRunner(t)
+		taskRunnerMock.EXPECT().Stop()
+		sare := createTestSare()
+		sare.Spec.Rotation.Enabled = true
+		consumerName := namespacedName(sare)
+
+		sut := Controller{rotateCronWatcher: make(map[string]cron.TaskRunner)}
+		sut.rotateCronWatcher[consumerName] = taskRunnerMock
+
+		// when
+		require.Equal(t, taskRunnerMock, sut.rotateCronWatcher[consumerName])
+		sut.deleteSaRotationWatcher(sare)
+
+		// then
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+	})
+}
+func TestController_setSaRotationWatcher(t *testing.T) {
+	t.Run("should add consumer to watcher on new creation", func(t *testing.T) {
+		// given
+		runCalledCh := make(chan struct{})
+		taskRunnerMock := newMockTaskRunner(t)
+		taskRunnerMock.EXPECT().Run().Run(func() {
+			close(runCalledCh)
+		})
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(taskRunnerMock, nil)
+
+		sare := createTestSare()
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
+
+		// when
+		sare.Spec.Rotation.Enabled = true
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
+
+		// then
+		require.NoError(t, err)
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
+		assertChannelReturnsWithTimeout(t, runCalledCh)
+	})
+
+	t.Run("should replace consumer in watcher on update", func(t *testing.T) {
+		// given
+		runCalledCh := make(chan struct{})
+		newTaskRunnerMock := newMockTaskRunner(t)
+		newTaskRunnerMock.EXPECT().Run().Run(func() {
+			close(runCalledCh)
+		})
+		oldTaskRunnerMock := newMockTaskRunner(t)
+		oldTaskRunnerMock.EXPECT().Stop()
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, testCron02am, mock.Anything).Return(newTaskRunnerMock, nil)
+
+		sare := createTestSare()
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
+
+		// when
+		sare.Spec.Rotation.Enabled = true
+		sut.rotateCronWatcher[consumerName] = oldTaskRunnerMock
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
+
+		// then
+		require.NoError(t, err)
+		require.NotNil(t, sut.rotateCronWatcher[consumerName])
+		assertChannelReturnsWithTimeout(t, runCalledCh)
+	})
+	t.Run("should fail on invalid cron syntax", func(t *testing.T) {
+		// given
+		taskRunnerFactoryMock := newMockTaskRunnerFactory(t)
+		taskRunnerFactoryMock.EXPECT().New(testCtx, mock.Anything, mock.Anything).Return(nil, assert.AnError)
+
+		sare := createTestSare()
+		consumerName := namespacedName(sare)
+
+		sut := Controller{cronTaskFactory: taskRunnerFactoryMock, rotateCronWatcher: make(map[string]cron.TaskRunner)}
+
+		// when
+		sare.Spec.Rotation.Enabled = true
+		sare.Spec.Rotation.Rotation = "\u1234-----fail-me"
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+
+		err := sut.setSaRotationWatcher(testCtx, sare)
+
+		// then
+		require.Error(t, err)
+		require.Nil(t, sut.rotateCronWatcher[consumerName])
+		assert.ErrorContains(t, err, `failed to set cron watcher for SARE "grafana-to-prometheus-ecosystem"`)
+	})
+}
+
+func assertChannelReturnsWithTimeout(t *testing.T, channelToTest <-chan struct{}) {
+	t.Helper()
+
+	timeout := time.After(1 * time.Second)
+	select {
+	case <-channelToTest:
+	case <-timeout:
+		assert.Fail(t, "task runner did not run")
+	}
 }
 
 func TestController_EnqueueRequestsForProducer(t *testing.T) {
 	t.Run("should enqueue SAREs that reference the given producer", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare1 := testSare
+		sare1 := createTestSare()
 		sare1.Spec.Optional = true
-		sare2 := testSare
+		sare2 := createTestSare()
 		sare2.Name = "loki-to-prometheus"
 		sare2.Spec.Optional = true
-		sare3 := testSare
+		sare3 := createTestSare()
 		sare3.Name = "grafana-to-alertmanager"
 		sare3.Spec.Producer = "alertmanager"
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare1, &sare2, &sare3).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare1, sare2, sare3).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
-		sapr := testSapr
-		requests := controller.enqueueRequestsForProducer(testCtx, &sapr)
+		requests := controller.enqueueRequestsForProducer(testCtx, createTestSapr())
 
 		require.Len(t, requests, 2)
 		names := []string{requests[0].Name, requests[1].Name}
@@ -579,14 +870,15 @@ func TestController_EnqueueRequestsForProducer(t *testing.T) {
 
 	t.Run("should return empty list when no SAREs reference the producer", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Name = "grafana-to-alertmanager"
 		sare.Spec.Producer = "alertmanager"
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
-		sapr := testSapr
-		requests := controller.enqueueRequestsForProducer(testCtx, &sapr)
+		requests := controller.enqueueRequestsForProducer(testCtx, createTestSapr())
 
 		assert.Empty(t, requests)
 	})
@@ -601,25 +893,594 @@ func TestController_EnqueueRequestsForProducer(t *testing.T) {
 				},
 			}).
 			Build()
-		controller := New(rtClient, scheme)
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
-		sapr := testSapr
-		requests := controller.enqueueRequestsForProducer(testCtx, &sapr)
+		requests := controller.enqueueRequestsForProducer(testCtx, createTestSapr())
 
 		assert.Empty(t, requests)
 	})
 
 	t.Run("should not enqueue SAREs from a different namespace", func(t *testing.T) {
 		scheme := newTestScheme(t)
-		sare := testSare
+		sare := createTestSare()
 		sare.Namespace = "other-namespace"
 		sare.Spec.Optional = true
-		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&sare).Build()
-		controller := New(rtClient, scheme)
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
 
-		sapr := testSapr
-		requests := controller.enqueueRequestsForProducer(testCtx, &sapr)
+		requests := controller.enqueueRequestsForProducer(testCtx, createTestSapr())
 
 		assert.Empty(t, requests)
 	})
+}
+
+func TestController_reconcileDelete(t *testing.T) {
+	type fields struct {
+		client                func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer)
+		producerClientFactory func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory
+		operatorConfig        *config.OperatorConfig
+		eventRecorder         func(t *testing.T) events.EventRecorder
+	}
+	type args struct {
+		sare *serviceaccountv2.ServiceAccountRequest
+	}
+
+	testSare := &serviceaccountv2.ServiceAccountRequest{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testReqName, DeletionTimestamp: new(metav1.NewTime(time.Now())), Finalizers: []string{"k8s.cloudogu.com/service-account-request-finalizer"}}, Spec: serviceaccountv2.ServiceAccountRequestSpec{Producer: testPrName, Consumer: testConsumer}}
+
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should skip if no finalizer is present",
+			args: args{
+				sare: &serviceaccountv2.ServiceAccountRequest{},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should remove finalizer if timeout is reached",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+					return sClient, nil
+				},
+				operatorConfig: &config.OperatorConfig{DeletionTimeout: time.Nanosecond},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil on successful deletion",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+					expectClientPatchStatus(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, nil, nil)
+				},
+				eventRecorder: func(t *testing.T) events.EventRecorder {
+					return newFakeRecorder(t, []string{"Normal ServiceAccountRequest Deleted service account \"grafana\""})
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil if producer is not found",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+
+					return sClient, nil
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil if the request does not exists anymore while deleting the finalizer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientEmptyFinalizerSare(t, sClient, errors2.NewNotFound(schema.GroupResource{Group: "", Resource: ""}, "sare"))
+
+					return sClient, nil
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting the finalizer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+
+					expectClientGetProducer(sClient, nil, errors2.NewNotFound(schema.GroupResource{}, "producer"))
+					expectClientEmptyFinalizerSare(t, sClient, assert.AnError)
+
+					return sClient, nil
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to remove finalizer from service account request \"grafana\":")
+			},
+		},
+		{
+			name: "should return error on error getting producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					expectClientGetProducer(sClient, nil, assert.AnError)
+					expectClientErrorStatusSare(t, sClient)
+					return sClient, nil
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to get producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return error on error getting service account client",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientErrorStatusSare(t, sClient)
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, nil, nil, assert.AnError)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to build service account client for producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return error on error checking if service account exists",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientErrorStatusSare(t, sClient)
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, assert.AnError, nil, nil)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to check if service account \"grafana\" exists at producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return nil if the service account does not exist in the producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, false, nil, nil, nil)
+				},
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting the service account at the producer",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientErrorStatusSare(t, sClient)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, assert.AnError, nil)
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to delete service account \"grafana\" at producer \"prometheus\":")
+			},
+		},
+		{
+			name: "should return nil if the update status of the producer fails",
+			args: args{
+				sare: testSare,
+			},
+			fields: fields{
+				client: func(t *testing.T) (client.Client, *serviceaccountv2.ServiceAccountProducer) {
+					sClient := newMockK8sClient(t)
+					testSapr := &serviceaccountv2.ServiceAccountProducer{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testPrName}}
+					expectClientGetProducer(sClient, testSapr, nil)
+					expectClientPatchStatus(t, sClient, assert.AnError)
+					expectClientEmptyFinalizerSare(t, sClient, nil)
+
+					return sClient, testSapr
+				},
+				producerClientFactory: func(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer) producerClientFactory {
+					return mockProducerFactory(t, sapr, true, nil, nil, nil)
+				},
+				eventRecorder: func(t *testing.T) events.EventRecorder {
+					return newFakeRecorder(t, []string{"Normal ServiceAccountRequest Deleted service account \"grafana\""})
+				},
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Controller{}
+			sapr := &serviceaccountv2.ServiceAccountProducer{}
+			ctx := context.Background()
+			if tt.fields.client != nil {
+				c.client, sapr = tt.fields.client(t)
+			}
+			if tt.fields.producerClientFactory != nil {
+				c.producerClientFactory = tt.fields.producerClientFactory(t, sapr)
+			}
+			if tt.fields.eventRecorder != nil {
+				c.eventRecorder = tt.fields.eventRecorder(t)
+			}
+
+			c.operatorConfig = &config.OperatorConfig{DeletionTimeout: time.Minute}
+			if tt.fields.operatorConfig != nil {
+				c.operatorConfig = tt.fields.operatorConfig
+			}
+
+			sare := &serviceaccountv2.ServiceAccountRequest{}
+			if tt.args.sare != nil {
+				sare = tt.args.sare.DeepCopy()
+			}
+
+			tt.wantErr(t, c.reconcileDelete(ctx, sare), fmt.Sprintf("reconcileDelete(%v, %v)", ctx, tt.args.sare))
+		})
+	}
+}
+
+func expectClientGetProducer(c *mockK8sClient, sapr *serviceaccountv2.ServiceAccountProducer, err error) {
+	c.EXPECT().Get(mock.Anything, types.NamespacedName{Namespace: testNamespace, Name: testPrName}, mock.IsType(&serviceaccountv2.ServiceAccountProducer{})).
+		Run(func(ctx context.Context, key types.NamespacedName, obj client.Object, opts ...client.GetOption) {
+			if err == nil && sapr != nil {
+				*obj.(*serviceaccountv2.ServiceAccountProducer) = *sapr
+			}
+		}).Return(err)
+}
+
+func expectClientEmptyFinalizerSare(t *testing.T, c *mockK8sClient, err error) {
+	c.EXPECT().Update(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountRequest{})).
+		Run(func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) {
+			if err == nil {
+				updatedSaReq := obj.(*serviceaccountv2.ServiceAccountRequest)
+				assert.Empty(t, updatedSaReq.Finalizers)
+			}
+		}).Return(err)
+}
+
+func expectClientErrorStatusSare(t *testing.T, c *mockK8sClient) {
+	statusClient := newMockStatusClient(t)
+	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountRequest{}), mock.Anything).
+		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
+			data, patchErr := patch.Data(obj)
+			require.NoError(t, patchErr)
+			s := string(data)
+			assert.Contains(t, s, `{"status":{"conditions"`)
+		}).Return(nil)
+	c.EXPECT().Status().Return(statusClient)
+}
+
+func expectClientPatchStatus(t *testing.T, c *mockK8sClient, err error) {
+	statusClient := newMockStatusClient(t)
+	statusClient.EXPECT().Patch(mock.Anything, mock.IsType(&serviceaccountv2.ServiceAccountProducer{}), mock.Anything).
+		Run(func(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) {
+			if err == nil {
+				data, patchErr := patch.Data(obj)
+				require.NoError(t, patchErr)
+				assert.Contains(t, string(data), `{"status":{"lastExecution"`)
+			}
+		}).Return(err)
+	c.EXPECT().Status().Return(statusClient)
+}
+
+func mockProducerFactory(t *testing.T, sapr *serviceaccountv2.ServiceAccountProducer, exists bool, existsErr, deleteErr, factoryErr error) producerClientFactory {
+	factory := newMockProducerClientFactory(t)
+	if factoryErr != nil {
+		factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(nil, factoryErr)
+		return factory
+	}
+
+	saClient := newMockServiceAccountClient(t)
+	saClient.EXPECT().Exists(mock.Anything, testQualifiedConsumer).Return(exists, existsErr)
+	if existsErr == nil && exists {
+		saClient.EXPECT().Delete(mock.Anything, testQualifiedConsumer).Return(deleteErr)
+	}
+
+	factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(saClient, nil)
+	return factory
+}
+
+func Test_wasDeletedPredicate(t *testing.T) {
+	sut := wasDeletedPredicate()
+	assert.True(t, sut.Delete(event.TypedDeleteEvent[client.Object]{}))
+	assert.False(t, sut.Create(event.TypedCreateEvent[client.Object]{}))
+	assert.False(t, sut.Update(event.TypedUpdateEvent[client.Object]{}))
+	assert.False(t, sut.Generic(event.TypedGenericEvent[client.Object]{}))
+}
+
+func Test_producerGotReadyPredicate(t *testing.T) {
+	sut := producerGotReadyPredicate()
+	tests := []struct {
+		name                 string
+		objectOld, objectNew client.Object
+		want                 bool
+	}{
+		{
+			name:      "should be false if old object has wrong type",
+			objectOld: &corev1.Pod{},
+			want:      false,
+		},
+		{
+			name:      "should be false if new object has wrong type",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{},
+			objectNew: &corev1.Pod{},
+			want:      false,
+		},
+		{
+			name: "should be false if ready condition changes from true to false",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
+			}},
+			objectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionFalse,
+				}},
+			}},
+			want: false,
+		},
+		{
+			name: "should be true if ready condition changes from false to true",
+			objectOld: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionFalse,
+				}},
+			}},
+			objectNew: &serviceaccountv2.ServiceAccountProducer{Status: serviceaccountv2.ServiceAccountProducerStatus{
+				Conditions: []metav1.Condition{{
+					Type:   serviceaccountv2.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
+			}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sut.Update(event.TypedUpdateEvent[client.Object]{
+				ObjectOld: tt.objectOld,
+				ObjectNew: tt.objectNew,
+			}))
+		})
+	}
+}
+
+func Test_namespacedName_returnsCompoundName(t *testing.T) {
+	actual := namespacedName(createTestSare())
+
+	assert.Equal(t, "grafana-to-prometheus-ecosystem", actual)
+}
+
+func TestController_removeFinalizer(t *testing.T) {
+	t.Run("should return when finalizer is already removed", func(t *testing.T) {
+		// given
+		sare := &serviceaccountv2.ServiceAccountRequest{ObjectMeta: metav1.ObjectMeta{Finalizers: nil}}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(
+			interceptor.Funcs{Update: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				assert.Fail(t, "should not be called")
+				return nil
+			}},
+		).Build()
+		controller := &Controller{client: fakeClient}
+
+		// when
+		err := controller.removeFinalizer(testCtx, sare)
+
+		// then
+		require.NoError(t, err)
+	})
+}
+
+func createTestSare() *serviceaccountv2.ServiceAccountRequest {
+	return &serviceaccountv2.ServiceAccountRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+		Spec: serviceaccountv2.ServiceAccountRequestSpec{
+			Consumer:     "grafana",
+			ConsumerType: serviceaccountv2.DoguConsumerType,
+			Producer:     "prometheus",
+			Rotation:     &serviceaccountv2.ServiceAccountRotation{Enabled: false, Rotation: testCron02am},
+		},
+	}
+}
+
+func createTestSapr() *serviceaccountv2.ServiceAccountProducer {
+	return &serviceaccountv2.ServiceAccountProducer{
+		ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Namespace: "ecosystem"},
+		Spec: serviceaccountv2.ServiceAccountProducerSpec{
+			Producer: "prometheus",
+			HTTP: &serviceaccountv2.HTTPProducer{
+				Endpoint: "http://prometheus:9090/serviceaccounts",
+				AuthSecret: serviceaccountv2.ServiceAccountProducerAuthSecret{
+					LocalSecretRef: serviceaccountv2.LocalSecretRef{Name: "prometheus-sa-secret"},
+					Key:            "apiKey",
+				},
+			},
+		},
+	}
+}
+
+func TestController_rotateSaSecretFunc(t *testing.T) {
+	tests := []struct {
+		name          string
+		constructorFn func(t *testing.T) *Controller
+		sare          *serviceaccountv2.ServiceAccountRequest
+		wantStatus    int
+		wantErr       assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should fail when checking if secret exists",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(false, "grafana-to-prometheus-sa-secret", assert.AnError)
+				return &Controller{secretManager: secretMock}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 1,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, assert.AnError, i) &&
+					assert.ErrorContains(t, err, "failed to check if secret \"grafana-to-prometheus-sa-secret\" exists for service account request \"grafana-to-prometheus\" during rotation")
+			},
+		},
+		{
+			name: "should return early if secret does not exist",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(false, "grafana-to-prometheus-sa-secret", nil)
+				return &Controller{secretManager: secretMock}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 0,
+			wantErr:    assert.NoError,
+		},
+		{
+			name: "should fail to delete secret",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(true, "grafana-to-prometheus-sa-secret", nil)
+				secretMock.EXPECT().Delete(t.Context(), mock.Anything).
+					Return(assert.AnError)
+
+				clientMock := newMockK8sClient(t)
+				clientStatusMock := newMockStatusClient(t)
+				clientMock.EXPECT().Status().Return(clientStatusMock)
+				clientStatusMock.EXPECT().Patch(t.Context(), mock.Anything, mock.Anything).
+					Return(assert.AnError)
+				return &Controller{
+					secretManager: secretMock,
+					client:        clientMock,
+				}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 1,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, assert.AnError, i) &&
+					assert.ErrorContains(t, err, "failed to delete secret \"grafana-to-prometheus-sa-secret\" for service account request \"grafana-to-prometheus\" during rotation")
+			},
+		},
+		{
+			name: "should successfully delete secret",
+			constructorFn: func(t *testing.T) *Controller {
+				secretMock := newMockSecretManager(t)
+				secretMock.EXPECT().Exists(t.Context(), &serviceaccountv2.ServiceAccountRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+				}).Return(true, "grafana-to-prometheus-sa-secret", nil)
+				secretMock.EXPECT().Delete(t.Context(), mock.Anything).
+					Return(nil)
+
+				clientMock := newMockK8sClient(t)
+				clientStatusMock := newMockStatusClient(t)
+				clientMock.EXPECT().Status().Return(clientStatusMock)
+				clientStatusMock.EXPECT().Patch(t.Context(), mock.Anything, mock.Anything).
+					Return(nil)
+				return &Controller{
+					secretManager: secretMock,
+					client:        clientMock,
+				}
+			},
+			sare: &serviceaccountv2.ServiceAccountRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"},
+			},
+			wantStatus: 0,
+			wantErr:    assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.constructorFn(t)
+			status, err := c.rotateSaSecretFunc(tt.sare)(t.Context())
+			assert.Equal(t, tt.wantStatus, status)
+			tt.wantErr(t, err)
+		})
+	}
 }

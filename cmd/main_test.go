@@ -15,7 +15,7 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		managerErrCh := make(chan error, 1)
 		managerErrCh <- nil
 
-		err := waitForGracefulShutdown(context.Background(), time.Second, managerErrCh)
+		err := waitForGracefulShutdown(context.Background(), time.Second, managerErrCh, nil)
 
 		require.NoError(t, err)
 	})
@@ -25,7 +25,7 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		managerErrCh := make(chan error, 1)
 		managerErrCh <- startErr
 
-		err := waitForGracefulShutdown(context.Background(), time.Second, managerErrCh)
+		err := waitForGracefulShutdown(context.Background(), time.Second, managerErrCh, nil)
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to run manager")
@@ -39,9 +39,10 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		managerErrCh := make(chan error, 1)
 		startedCh := make(chan struct{})
 		errCh := make(chan error, 1)
+		var sareCleanupCalled bool
 		go func() {
 			close(startedCh)
-			errCh <- waitForGracefulShutdown(ctx, time.Second, managerErrCh)
+			errCh <- waitForGracefulShutdown(ctx, time.Second, managerErrCh, func() { sareCleanupCalled = true })
 		}()
 
 		<-startedCh
@@ -59,6 +60,7 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for graceful shutdown")
 		}
+		assert.True(t, sareCleanupCalled)
 	})
 
 	t.Run("returns timeout when manager does not stop", func(t *testing.T) {
@@ -68,8 +70,11 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		timeout := 20 * time.Millisecond
 		managerErrCh := make(chan error)
 		errCh := make(chan error, 1)
+		sareCleanupCalled := false
 
-		go func() { errCh <- waitForGracefulShutdown(ctx, timeout, managerErrCh) }()
+		go func() {
+			errCh <- waitForGracefulShutdown(ctx, timeout, managerErrCh, func() { sareCleanupCalled = true })
+		}()
 		cancel()
 
 		select {
@@ -79,5 +84,6 @@ func TestWaitForGracefulShutdown(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for shutdown timeout")
 		}
+		assert.True(t, sareCleanupCalled)
 	})
 }

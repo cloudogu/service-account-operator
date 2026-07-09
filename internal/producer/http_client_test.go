@@ -14,16 +14,16 @@ import (
 
 var testCtx = context.Background()
 
-func TestHTTPClient_Create(t *testing.T) {
-	t.Run("should send POST with consumer and params in body and return credentials", func(t *testing.T) {
+func TestHTTPClient_CreateOrUpdate(t *testing.T) {
+	t.Run("should send PUT with consumer and params in body and return credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, http.MethodPut, r.Method)
 			assert.Equal(t, "/", r.URL.Path)
 			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			require.NoError(t, json.Unmarshal(body, &req))
 			assert.Equal(t, "grafana", req.Consumer)
 			assert.Equal(t, Params{"verbose": "true"}, req.Params)
@@ -35,17 +35,43 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "test-api-key")
-		creds, err := client.Create(testCtx, "grafana", Params{"verbose": "true"})
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "true"}, BehaviorParams{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "grafana-user", creds["username"])
 		assert.Equal(t, "secret", creds["password"])
 	})
 
+	t.Run("should send PUT with consumer and params in body but does not return credentials with HTTP 204", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPut, r.Method)
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "test-api-key", r.Header.Get(apiKeyHeader))
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, _ := io.ReadAll(r.Body)
+			var req createOrUpdateRequestBody
+			require.NoError(t, json.Unmarshal(body, &req))
+			assert.Equal(t, "grafana", req.Consumer)
+			assert.Equal(t, Params{"verbose": "haveChangeHere"}, req.Params)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNoContent)
+			// here are no credentials because the producer didn't change them
+		}))
+		defer server.Close()
+
+		client := NewHTTPClient(server.URL, "test-api-key")
+		creds, err := client.CreateOrUpdate(testCtx, "grafana", Params{"verbose": "haveChangeHere"}, BehaviorParams{})
+
+		require.NoError(t, err)
+		assert.Nil(t, creds)
+	})
+
 	t.Run("should send empty params when Params is nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
-			var req createRequestBody
+			var req createOrUpdateRequestBody
 			_ = json.Unmarshal(body, &req)
 			assert.Empty(t, req.Params)
 
@@ -55,20 +81,20 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		creds, err := client.Create(testCtx, "consumer", nil)
+		creds, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "abc", creds["apiKey"])
 	})
 
-	t.Run("should return error when producer returns non-201 status", func(t *testing.T) {
+	t.Run("should return error when producer returns non-20x status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 		}))
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Create(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "producer returned unexpected status 400")
@@ -81,26 +107,26 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "wrong-key")
-		_, err := client.Create(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "rejected the request with 401 — check the API key in the auth secret")
+		assert.ErrorContains(t, err, "rejected the request with 401; please check the API key in the SARE auth secret")
 	})
 
 	t.Run("should return error when server is unreachable", func(t *testing.T) {
 		client := NewHTTPClient("http://127.0.0.1:1", "key")
-		_, err := client.Create(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "HTTP create-serviceaccount request to producer \"http://127.0.0.1:1\" failed:")
+		assert.ErrorContains(t, err, "http serviceaccount request to producer \"http://127.0.0.1:1\" failed:")
 	})
 
 	t.Run("should return error for invalid endpoint URL", func(t *testing.T) {
 		client := NewHTTPClient("://invalid", "key")
-		_, err := client.Create(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "failed to create HTTP request: parse \"://invalid\": missing protocol scheme")
+		assert.ErrorContains(t, err, "failed to create HTTP put request: parse \"://invalid\": missing protocol scheme")
 	})
 
 	t.Run("should return error when producer response body is not valid JSON", func(t *testing.T) {
@@ -111,19 +137,10 @@ func TestHTTPClient_Create(t *testing.T) {
 		defer server.Close()
 
 		client := NewHTTPClient(server.URL, "key")
-		_, err := client.Create(testCtx, "consumer", nil)
+		_, err := client.CreateOrUpdate(testCtx, "consumer", nil, BehaviorParams{})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode producer response")
-	})
-}
-
-func TestHTTPClient_Update(t *testing.T) {
-	t.Run("should panic because Update is not yet implemented", func(t *testing.T) {
-		client := NewHTTPClient("http://example.com", "key")
-		assert.Panics(t, func() {
-			_, _ = client.Update(testCtx, "consumer", nil)
-		})
 	})
 }
 
@@ -235,5 +252,121 @@ func TestHTTPClient_Delete(t *testing.T) {
 		defer server.Close()
 
 		require.NoError(t, NewHTTPClient(server.URL, "test-api-key").Delete(testCtx, "grafana"))
+	})
+}
+
+func TestHttpClient_Exists(t *testing.T) {
+	tests := []struct {
+		name    string
+		server  func() *httptest.Server
+		want    bool
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return true on status code 200",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusOK)
+				}))
+			},
+			want:    true,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return false on status code 404",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusNotFound)
+				}))
+			},
+			want:    false,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on other status codes than 200 or 404",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodHead, r.Method)
+					assert.Equal(t, "/grafana", r.URL.Path)
+					assert.Equal(t, "api-key", r.Header.Get(apiKeyHeader))
+					w.WriteHeader(http.StatusInternalServerError)
+				}))
+			},
+			want: false,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "producer returned unexpected status 500 for")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			server := tt.server()
+			defer server.Close()
+
+			c := &HttpClient{
+				client:   &http.Client{Timeout: defaultTimeout30secs},
+				endpoint: server.URL,
+				apiKey:   "api-key",
+			}
+			got, err := c.Exists(context.Background(), "grafana")
+			if !tt.wantErr(t, err) {
+				return
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBehaviorParams(t *testing.T) {
+	t.Run("should marshal minimal body properly", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			Params:         nil,
+			BehaviorParams: BehaviorParams{},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer"}`, string(actual))
+	})
+	t.Run("should marshal maximal body", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			Params:         map[string]string{"key": "value"},
+			BehaviorParams: BehaviorParams{RotateServiceAccountNow: true},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer","params":{"key":"value"},"behaviorParams":{"rotateServiceAccountNow":true}}`, string(actual))
+	})
+	t.Run("should suppress rotation zero value", func(t *testing.T) {
+		// given
+		sut := createOrUpdateRequestBody{
+			Consumer:       "le-consumer",
+			BehaviorParams: BehaviorParams{RotateServiceAccountNow: false},
+		}
+
+		// when
+		actual, err := json.Marshal(sut)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, `{"consumer":"le-consumer"}`, string(actual))
 	})
 }

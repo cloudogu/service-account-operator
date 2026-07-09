@@ -21,29 +21,29 @@ func (_m *MockServiceAccountClient) EXPECT() *MockServiceAccountClient_Expecter 
 	return &MockServiceAccountClient_Expecter{mock: &_m.Mock}
 }
 
-// Create provides a mock function with given fields: ctx, consumer, params
-func (_m *MockServiceAccountClient) Create(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	ret := _m.Called(ctx, consumer, params)
+// CreateOrUpdate provides a mock function with given fields: ctx, consumer, params, behaviorParams
+func (_m *MockServiceAccountClient) CreateOrUpdate(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams) (map[string]string, error) {
+	ret := _m.Called(ctx, consumer, params, behaviorParams)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Create")
+		panic("no return value specified for CreateOrUpdate")
 	}
 
 	var r0 map[string]string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, Params) (map[string]string, error)); ok {
-		return rf(ctx, consumer, params)
+	if rf, ok := ret.Get(0).(func(context.Context, string, Params, BehaviorParams) (map[string]string, error)); ok {
+		return rf(ctx, consumer, params, behaviorParams)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, Params) map[string]string); ok {
-		r0 = rf(ctx, consumer, params)
+	if rf, ok := ret.Get(0).(func(context.Context, string, Params, BehaviorParams) map[string]string); ok {
+		r0 = rf(ctx, consumer, params, behaviorParams)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, Params) error); ok {
-		r1 = rf(ctx, consumer, params)
+	if rf, ok := ret.Get(1).(func(context.Context, string, Params, BehaviorParams) error); ok {
+		r1 = rf(ctx, consumer, params, behaviorParams)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -51,32 +51,33 @@ func (_m *MockServiceAccountClient) Create(ctx context.Context, consumer string,
 	return r0, r1
 }
 
-// MockServiceAccountClient_Create_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Create'
-type MockServiceAccountClient_Create_Call struct {
+// MockServiceAccountClient_CreateOrUpdate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateOrUpdate'
+type MockServiceAccountClient_CreateOrUpdate_Call struct {
 	*mock.Call
 }
 
-// Create is a helper method to define mock.On call
+// CreateOrUpdate is a helper method to define mock.On call
 //   - ctx context.Context
 //   - consumer string
 //   - params Params
-func (_e *MockServiceAccountClient_Expecter) Create(ctx interface{}, consumer interface{}, params interface{}) *MockServiceAccountClient_Create_Call {
-	return &MockServiceAccountClient_Create_Call{Call: _e.mock.On("Create", ctx, consumer, params)}
+//   - behaviorParams BehaviorParams
+func (_e *MockServiceAccountClient_Expecter) CreateOrUpdate(ctx interface{}, consumer interface{}, params interface{}, behaviorParams interface{}) *MockServiceAccountClient_CreateOrUpdate_Call {
+	return &MockServiceAccountClient_CreateOrUpdate_Call{Call: _e.mock.On("CreateOrUpdate", ctx, consumer, params, behaviorParams)}
 }
 
-func (_c *MockServiceAccountClient_Create_Call) Run(run func(ctx context.Context, consumer string, params Params)) *MockServiceAccountClient_Create_Call {
+func (_c *MockServiceAccountClient_CreateOrUpdate_Call) Run(run func(ctx context.Context, consumer string, params Params, behaviorParams BehaviorParams)) *MockServiceAccountClient_CreateOrUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(Params))
+		run(args[0].(context.Context), args[1].(string), args[2].(Params), args[3].(BehaviorParams))
 	})
 	return _c
 }
 
-func (_c *MockServiceAccountClient_Create_Call) Return(_a0 map[string]string, _a1 error) *MockServiceAccountClient_Create_Call {
+func (_c *MockServiceAccountClient_CreateOrUpdate_Call) Return(_a0 map[string]string, _a1 error) *MockServiceAccountClient_CreateOrUpdate_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockServiceAccountClient_Create_Call) RunAndReturn(run func(context.Context, string, Params) (map[string]string, error)) *MockServiceAccountClient_Create_Call {
+func (_c *MockServiceAccountClient_CreateOrUpdate_Call) RunAndReturn(run func(context.Context, string, Params, BehaviorParams) (map[string]string, error)) *MockServiceAccountClient_CreateOrUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -128,6 +129,63 @@ func (_c *MockServiceAccountClient_Delete_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// Exists provides a mock function with given fields: ctx, consumer
+func (_m *MockServiceAccountClient) Exists(ctx context.Context, consumer string) (bool, error) {
+	ret := _m.Called(ctx, consumer)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Exists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, consumer)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, consumer)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, consumer)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockServiceAccountClient_Exists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exists'
+type MockServiceAccountClient_Exists_Call struct {
+	*mock.Call
+}
+
+// Exists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - consumer string
+func (_e *MockServiceAccountClient_Expecter) Exists(ctx interface{}, consumer interface{}) *MockServiceAccountClient_Exists_Call {
+	return &MockServiceAccountClient_Exists_Call{Call: _e.mock.On("Exists", ctx, consumer)}
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) Run(run func(ctx context.Context, consumer string)) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) Return(_a0 bool, _a1 error) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockServiceAccountClient_Exists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *MockServiceAccountClient_Exists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Ready provides a mock function with given fields: ctx
 func (_m *MockServiceAccountClient) Ready(ctx context.Context) error {
 	ret := _m.Called(ctx)
@@ -170,66 +228,6 @@ func (_c *MockServiceAccountClient_Ready_Call) Return(_a0 error) *MockServiceAcc
 }
 
 func (_c *MockServiceAccountClient_Ready_Call) RunAndReturn(run func(context.Context) error) *MockServiceAccountClient_Ready_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Update provides a mock function with given fields: ctx, consumer, params
-func (_m *MockServiceAccountClient) Update(ctx context.Context, consumer string, params Params) (map[string]string, error) {
-	ret := _m.Called(ctx, consumer, params)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Update")
-	}
-
-	var r0 map[string]string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, Params) (map[string]string, error)); ok {
-		return rf(ctx, consumer, params)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, Params) map[string]string); ok {
-		r0 = rf(ctx, consumer, params)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, Params) error); ok {
-		r1 = rf(ctx, consumer, params)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockServiceAccountClient_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
-type MockServiceAccountClient_Update_Call struct {
-	*mock.Call
-}
-
-// Update is a helper method to define mock.On call
-//   - ctx context.Context
-//   - consumer string
-//   - params Params
-func (_e *MockServiceAccountClient_Expecter) Update(ctx interface{}, consumer interface{}, params interface{}) *MockServiceAccountClient_Update_Call {
-	return &MockServiceAccountClient_Update_Call{Call: _e.mock.On("Update", ctx, consumer, params)}
-}
-
-func (_c *MockServiceAccountClient_Update_Call) Run(run func(ctx context.Context, consumer string, params Params)) *MockServiceAccountClient_Update_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(Params))
-	})
-	return _c
-}
-
-func (_c *MockServiceAccountClient_Update_Call) Return(_a0 map[string]string, _a1 error) *MockServiceAccountClient_Update_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockServiceAccountClient_Update_Call) RunAndReturn(run func(context.Context, string, Params) (map[string]string, error)) *MockServiceAccountClient_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

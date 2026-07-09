@@ -39,6 +39,10 @@ spec:
               value: {{ .Values.manager.env.stage | default "production" | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.manager.env.logLevel | default "info" | quote }}
+            - name: DELETION_TIMEOUT
+              value: {{ .Values.manager.env.deletionTimeout | default "24h" | quote }}
+            - name: PRODUCER_RECONCILE_INTERVAL
+              value: {{ .Values.manager.env.producerReconcileInterval | default "10s" | quote }}
             - name: NAMESPACE
               valueFrom:
                 fieldRef:

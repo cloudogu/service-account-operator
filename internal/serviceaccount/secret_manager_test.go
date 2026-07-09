@@ -3,14 +3,17 @@ package serviceaccount
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -46,10 +49,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.False(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return true when target secret exists and is owned by the SARE", func(t *testing.T) {
@@ -59,10 +63,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return ErrSecretConflict when target secret exists but is not owned by this SARE", func(t *testing.T) {
@@ -74,10 +79,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.ErrorIs(t, err, ErrSecretConflict)
 		assert.False(t, exists)
+		assert.Equal(t, secretName, sare.Name)
 	})
 
 	t.Run("should return error when client returns unexpected error", func(t *testing.T) {
@@ -97,7 +103,7 @@ func TestSecretManager_Exists(t *testing.T) {
 			Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		_, err := sm.Exists(testCtx, sare)
+		_, _, err := sm.Exists(testCtx, sare)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to check for existing secret")
@@ -111,10 +117,11 @@ func TestSecretManager_Exists(t *testing.T) {
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sare, existing).Build()
 
 		sm := NewSecretManager(rtClient, scheme)
-		exists, err := sm.Exists(testCtx, sare)
+		exists, secretName, err := sm.Exists(testCtx, sare)
 
 		require.NoError(t, err)
 		assert.True(t, exists)
+		assert.Equal(t, "custom-creds", secretName)
 	})
 }
 
@@ -234,4 +241,73 @@ func newOwnedSecret(name, namespace string, owner *serviceaccountv2.ServiceAccou
 	}
 	require.NoError(t, controllerutil.SetControllerReference(owner, secret, scheme))
 	return secret
+}
+
+func TestSecretManager_Delete(t *testing.T) {
+	type fields struct {
+		client func(*testing.T) client.Client
+	}
+	type args struct {
+		sare *serviceaccountv2.ServiceAccountRequest
+	}
+	testCtx := context.Background()
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "should return nil on successful delete",
+			fields: fields{
+				client: func(t *testing.T) client.Client {
+					mClient := newMockK8sClient(t)
+					mClient.EXPECT().Delete(testCtx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"}}).Return(nil)
+					return mClient
+				},
+			},
+			args: args{
+				sare: newTestSARE("grafana-to-prometheus", "ecosystem"),
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return nil on resource not found error",
+			fields: fields{
+				client: func(t *testing.T) client.Client {
+					mClient := newMockK8sClient(t)
+					mClient.EXPECT().Delete(testCtx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"}}).Return(errors2.NewNotFound(schema.GroupResource{}, "secret"))
+					return mClient
+				},
+			},
+			args: args{
+				sare: newTestSARE("grafana-to-prometheus", "ecosystem"),
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "should return error on error deleting the secret",
+			fields: fields{
+				client: func(t *testing.T) client.Client {
+					mClient := newMockK8sClient(t)
+					mClient.EXPECT().Delete(testCtx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "grafana-to-prometheus", Namespace: "ecosystem"}}).Return(assert.AnError)
+					return mClient
+				},
+			},
+			args: args{
+				sare: newTestSARE("grafana-to-prometheus", "ecosystem"),
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorContains(t, err, "failed to delete secret \"grafana-to-prometheus\" for service account request \"grafana-to-prometheus\"")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := &SecretManager{
+				client: tt.fields.client(t),
+			}
+			tt.wantErr(t, sm.Delete(testCtx, tt.args.sare), fmt.Sprintf("Delete(%v, %v)", testCtx, tt.args.sare))
+		})
+	}
 }

@@ -20,9 +20,7 @@ type logSink interface {
 var setLogger = ctrl.SetLogger
 
 func ConfigureLogger() {
-	zapOpts := getZapOptions()
-
-	setLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+	setLogger(zap.New(zap.UseFlagOptions(new(getZapOptions()))))
 }
 
 func getZapOptions() zap.Options {
