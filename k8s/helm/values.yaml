@@ -15,6 +15,7 @@ manager:
     stage: production
     # if the cleanup of dependent resources of the service account request fails, the operator will remove the request's finalizer after this timeout
     deletionTimeout: 24h # Set this value to a shorter time to avoid hanging resources while cleaning up dev clusters
+    # check periodically with this interval. This helps to recover transient connectivity problems (via the Ready condition) without an external trigger
     producerReconcileInterval: 10s
   resourceLimits:
     memory: 128Mi
