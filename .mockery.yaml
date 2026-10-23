@@ -1,14 +1,21 @@
-with-expecter: true
+# Configuration for mockery v3 (https://vektra.github.io/mockery/v3/configuration/).
+# This file belongs to the repository and may be adapted freely;
 all: true
-exclude: ["vendor"]
 recursive: true
-inpackage: true
-include-auto-generated: false
-mockname: "{{.Mock}}{{.InterfaceName | camelcase }}"
-filename: "mock_{{.InterfaceName}}_test.go"
-dir: "{{.InterfaceDir}}"
+# "testify" generates mocks with EXPECT() expectations. Alternatively, "matryer" generates
+# moq-style mocks with a func field per method (no testify dependency), see
+# https://vektra.github.io/mockery/v3.8/template/matryer/
+template: testify
 
+dir: "{{.InterfaceDir}}"
+filename: "mocks_test.go"
+pkgname: "{{.SrcPackageName}}"
+structname: "{{.Mock}}{{.InterfaceName | firstUpper }}"
+
+exclude-subpkg-regex:
+  - "vendor"
+
+# 'make mocks-init' adds one entry per module (several in a go workspace).
 packages:
   github.com/cloudogu/service-account-operator:
-    config:
-      recursive: True
+    config: {}

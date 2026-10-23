@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `manager.extraEnv` in values.yaml to allow setting extra environment variables for the manager container
   - This is useful for setting e.g., a timezone variable
+- [#12] Automatically create network policies to reach producer endpoints for each producer
+  - Before, this network policy had to be provided by each producer
 
 ## [v1.0.0] - 2026-07-09
 **Heads-up: Breaking Change ahead**

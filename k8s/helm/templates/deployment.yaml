@@ -47,6 +47,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: NETWORK_POLICIES_ENABLED
+              value: {{ .Values.global.networkPolicies.enabled | default "false" | quote }}
+            - name: SELECTOR_LABELS
+              value: |
+                {{ include "service-account-operator.selectorLabels" . | nindent 16 }}
             {{- with .Values.manager.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

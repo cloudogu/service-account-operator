@@ -62,7 +62,7 @@ func startManager(cfg *config.OperatorConfig) error {
 		return fmt.Errorf("failed to create service account request controller: %w", err)
 	}
 
-	serviceAccountProducerController := producer.New(mgr.GetClient(), cfg.ProducerReconcileInterval)
+	serviceAccountProducerController := producer.New(mgr.GetClient(), cfg)
 	if err := serviceAccountProducerController.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("failed to create service account producer controller: %w", err)
 	}
