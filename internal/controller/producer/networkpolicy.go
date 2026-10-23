@@ -89,6 +89,9 @@ func (n *defaultNetworkPolicyUpserter) generate(ctx context.Context, name string
 					From: []networkingv1.NetworkPolicyPeer{
 						{
 							PodSelector: &metav1.LabelSelector{MatchLabels: n.selectorLabels},
+							NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+								"kubernetes.io/metadata.name": producer.Namespace,
+							}},
 						},
 					},
 				},

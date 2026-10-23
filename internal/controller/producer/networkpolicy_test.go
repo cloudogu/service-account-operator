@@ -168,6 +168,9 @@ func Test_defaultNetworkPolicyUpserter_UpsertNetworkPolicy(t *testing.T) {
 									PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
 										"k8s.cloudogu.com/component.name": "service-account-operator",
 									}},
+									NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "test",
+									}},
 								},
 							},
 						},
@@ -211,6 +214,9 @@ func Test_defaultNetworkPolicyUpserter_UpsertNetworkPolicy(t *testing.T) {
 									PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
 										"k8s.cloudogu.com/component.name": "service-account-operator",
 									}},
+									NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "test",
+									}},
 								},
 							},
 						},
@@ -253,6 +259,9 @@ func Test_defaultNetworkPolicyUpserter_UpsertNetworkPolicy(t *testing.T) {
 								{
 									PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
 										"k8s.cloudogu.com/component.name": "service-account-operator",
+									}},
+									NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "test",
 									}},
 								},
 							},
