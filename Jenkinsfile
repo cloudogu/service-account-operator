@@ -162,6 +162,7 @@ void stageSmokeTest(Makefile makefile) {
               }
             }
 
+            k3d.helm("dependency build ${helmChartDir}")
             k3d.helm("install ${repositoryName} ${helmChartDir}")
         }
 
