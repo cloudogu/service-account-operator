@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	v2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
+	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,7 +27,7 @@ type defaultNetworkPolicyUpserter struct {
 	selectorLabels map[string]string
 }
 
-func (n *defaultNetworkPolicyUpserter) UpsertNetworkPolicy(ctx context.Context, producer *v2.ServiceAccountProducer) error {
+func (n *defaultNetworkPolicyUpserter) UpsertNetworkPolicy(ctx context.Context, producer *serviceaccountv2.ServiceAccountProducer) error {
 	netpolName := networkPolicyName(producer)
 
 	if !n.netpolsEnabled {
@@ -59,13 +59,14 @@ func (n *defaultNetworkPolicyUpserter) UpsertNetworkPolicy(ctx context.Context, 
 	return nil
 }
 
-func (n *defaultNetworkPolicyUpserter) generate(ctx context.Context, name string, producer *v2.ServiceAccountProducer) (*networkingv1.NetworkPolicy, error) {
+func (n *defaultNetworkPolicyUpserter) generate(ctx context.Context, name string, producer *serviceaccountv2.ServiceAccountProducer) (*networkingv1.NetworkPolicy, error) {
 	svcName, svcPort, err := parseServiceNameAndPortFromEndpointUrl(producer)
 	if err != nil {
 		return nil, fmt.Errorf("parse service name and port from endpoint url: %w", err)
 	}
 
-	service, err := n.getService(ctx, svcName, producer.Namespace)
+	service := &corev1.Service{}
+	err = n.k8sClient.Get(ctx, types.NamespacedName{Name: svcName, Namespace: producer.Namespace}, service)
 	if err != nil {
 		return nil, fmt.Errorf("get service %q: %w", svcName, err)
 	}
@@ -96,27 +97,17 @@ func (n *defaultNetworkPolicyUpserter) generate(ctx context.Context, name string
 	}
 	err = controllerutil.SetOwnerReference(producer, netpol, n.k8sClient.Scheme())
 	if err != nil {
-		return nil, fmt.Errorf("set owner reference of producer %s on network policy %s: %w", producer.Name, name, err)
+		return nil, fmt.Errorf("set owner reference of producer %q on network policy %q: %w", producer.Name, name, err)
 	}
 
 	return netpol, nil
 }
 
-func (n *defaultNetworkPolicyUpserter) getService(ctx context.Context, svcName, namespace string) (*corev1.Service, error) {
-	svc := &corev1.Service{}
-	err := n.k8sClient.Get(ctx, types.NamespacedName{Name: svcName, Namespace: namespace}, svc)
-	if err != nil {
-		return nil, fmt.Errorf("get service %q: %w", svcName, err)
-	}
-
-	return svc, nil
-}
-
-func networkPolicyName(producer *v2.ServiceAccountProducer) string {
+func networkPolicyName(producer *serviceaccountv2.ServiceAccountProducer) string {
 	return fmt.Sprintf("%s-sa-manager", producer.GetName())
 }
 
-func parseServiceNameAndPortFromEndpointUrl(producer *v2.ServiceAccountProducer) (string, int32, error) {
+func parseServiceNameAndPortFromEndpointUrl(producer *serviceaccountv2.ServiceAccountProducer) (string, int32, error) {
 	endpointString := producer.Spec.HTTP.Endpoint
 	if !strings.HasPrefix(endpointString, "http://") && !strings.HasPrefix(endpointString, "https://") {
 		// url.Parse will fail if the endpoint string does not have a scheme.
@@ -137,12 +128,14 @@ func parseServiceNameAndPortFromEndpointUrl(producer *v2.ServiceAccountProducer)
 		case "https":
 			portString = "443"
 		default:
+			// will probably never occur as we prefix the endpoint with either the http or https scheme
 			return "", 0, fmt.Errorf("determine port for endpoint url %q", endpointString)
 		}
 	}
 
 	port, err := strconv.ParseInt(portString, 10, 32)
 	if err != nil {
+		// seems to be handled by url.Parse and will probably never occur
 		return "", 0, fmt.Errorf("parse port %q: %w", portString, err)
 	}
 

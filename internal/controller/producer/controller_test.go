@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -386,7 +388,11 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 
 	scheme := runtime.NewScheme()
 	metav1.AddToGroupVersion(scheme, serviceaccountv2.GroupVersion)
-	require.NoError(t, serviceaccountv2.AddToScheme(scheme), "AddToScheme() failed")
+	require.NoError(t, serviceaccountv2.AddToScheme(scheme), "serviceaccountv2.AddToScheme() failed")
+	metav1.AddToGroupVersion(scheme, corev1.SchemeGroupVersion)
+	require.NoError(t, corev1.AddToScheme(scheme), "corev1.AddToScheme() failed")
+	metav1.AddToGroupVersion(scheme, networkingv1.SchemeGroupVersion)
+	require.NoError(t, networkingv1.AddToScheme(scheme), "networkingv1.AddToScheme() failed")
 
 	return scheme
 }
