@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `manager.extraEnv` in values.yaml to allow setting extra environment variables for the manager container
   - This is useful for setting e.g., a timezone variable
+- [#14] Added a dependency to the prometheus-operator-crds when the servicemonitor is enabled
 
 ## [v1.0.0] - 2026-07-09
 **Heads-up: Breaking Change ahead**
