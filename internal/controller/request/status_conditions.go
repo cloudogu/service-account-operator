@@ -37,10 +37,10 @@ func serviceAccountNotReadyForRotation(ctx context.Context, c client.Client, sar
 		"SecretRotationInProgress", "")
 }
 
-// serviceAccountFailed sets ServiceAccountReady=False with the error message and persists the condition.
-func serviceAccountFailed(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
+// serviceAccountFailed sets ServiceAccountReady=False with the given reason and the error message and persists the condition.
+func serviceAccountFailed(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, reason string, err error) error {
 	return setAndPersist(ctx, c, sare, nil, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
-		serviceaccountv2.ConditionReasonServiceAccountReadyFailed, err.Error())
+		reason, err.Error())
 }
 
 // setAndPersist applies an optional status mutation plus a condition to the SARE and patches the status subresource.

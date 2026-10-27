@@ -55,18 +55,18 @@ func (d *defaultCronTaskFactory) New(ctx context.Context, expr string, jobClosur
 func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) (controller *Controller, cleanup func()) {
 	runners := make(map[string]cron.TaskRunner)
 	return &Controller{
-			client:                rtClient,
-			secretManager:         sa.NewSecretManager(rtClient, scheme),
-			producerClientFactory: producer.NewClientFactory(rtClient),
-			operatorConfig:        operatorConfig,
-			eventRecorder:         eventRecorder,
-			cronTaskFactory:       new(defaultCronTaskFactory),
-			rotateCronWatcher:     runners,
-		}, func() {
-			for _, runner := range runners {
-				runner.Stop()
-			}
+		client:                rtClient,
+		secretManager:         sa.NewSecretManager(rtClient, scheme),
+		producerClientFactory: producer.NewClientFactory(rtClient),
+		operatorConfig:        operatorConfig,
+		eventRecorder:         eventRecorder,
+		cronTaskFactory:       new(defaultCronTaskFactory),
+		rotateCronWatcher:     runners,
+	}, func() {
+		for _, runner := range runners {
+			runner.Stop()
 		}
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -110,26 +110,35 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // See cloudogu/service-account-operator#8
 
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	secretName, isRotation, abort, err := c.createOrUpdate(ctx, sare)
+	result, err := c.createOrUpdate(ctx, sare)
 	if err != nil {
 		return ctrl.Result{}, c.fail(ctx, sare, err)
-	} else if abort {
+	} else if result.abort {
 		return ctrl.Result{}, nil
 	}
 
-	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
+	if err := serviceAccountReady(ctx, c.client, sare, result.secretName, result.isRotation); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (secretName string, isRotation bool, abort bool, err error) {
+// createOrUpdateResult is the outcome of a successful or aborted create/update of a service account.
+type createOrUpdateResult struct {
+	secretName string
+	isRotation bool
+	abort      bool
+}
+
+var abortedCreateOrUpdate = createOrUpdateResult{abort: true}
+
+func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (createOrUpdateResult, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
 	secretExists, secretName, err := c.checkSecretExists(ctx, sare, logger)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
 	createOrUpdateString := createdOrUpdated(secretExists)
@@ -137,24 +146,24 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 
 	err = c.handleSaRotationWatcher(ctx, sare)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
 	sapr, abort, err := c.getProducerForCreateOrUpdate(ctx, sare, logger)
 	if abort || err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
 	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
-	isRotation = credentials != nil
+	isRotation := credentials != nil
 	if isRotation {
 		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 		if err != nil {
-			return "", false, true, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
+			return abortedCreateOrUpdate, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
 		}
 
 		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
@@ -163,7 +172,7 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
 	}
 
-	return secretName, isRotation, false, nil
+	return createOrUpdateResult{secretName: secretName, isRotation: isRotation}, nil
 }
 
 func (c *Controller) getProducerForCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (sapr *serviceaccountv2.ServiceAccountProducer, abort bool, err error) {
@@ -251,10 +260,14 @@ func (c *Controller) getServiceAccountClient(ctx context.Context, sare *servicea
 	return saClient, nil
 }
 
-// fail records a failed ServiceAccountReady condition and returns the original
-// error so the reconcile is retried with backoff.
+// fail records a failed ServiceAccountReady condition with reason ServiceAccountFailed and returns the original error so the reconcile is retried with backoff.
 func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
-	if patchErr := serviceAccountFailed(ctx, c.client, sare, err); patchErr != nil {
+	return c.failWithReason(ctx, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, err)
+}
+
+// failWithReason records a failed ServiceAccountReady condition with the given reason and returns the original error so the reconcile is retried with backoff.
+func (c *Controller) failWithReason(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, reason string, err error) error {
+	if patchErr := serviceAccountFailed(ctx, c.client, sare, reason, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
 

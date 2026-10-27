@@ -110,7 +110,7 @@ func TestServiceAccountFailed(t *testing.T) {
 		rtClient := buildStatusClient(t, sare)
 
 		reconcileErr := errors.New("connection refused")
-		err := serviceAccountFailed(testCtx, rtClient, sare, reconcileErr)
+		err := serviceAccountFailed(testCtx, rtClient, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, reconcileErr)
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, sare)
@@ -127,7 +127,7 @@ func TestServiceAccountFailed(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusClientWithoutObject(t)
 
-		err := serviceAccountFailed(testCtx, rtClient, sare, errors.New("boom"))
+		err := serviceAccountFailed(testCtx, rtClient, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, errors.New("boom"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeServiceAccountReady)
