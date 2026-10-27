@@ -27,14 +27,23 @@ func NewMigrationSource(c k8sClient) *MigrationSource {
 	return &MigrationSource{client: c}
 }
 
-// Credentials returns the credentials stored in the migration secret <doguname>-migration of the SARE's dogu.
-func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (map[string]string, error) {
+// MigrationSecretName returns the name of the migration secret of the SARE's dogu, or an empty string if the SARE has no doguName label.
+func MigrationSecretName(sare *serviceaccountv2.ServiceAccountRequest) string {
 	doguName := sare.Labels[doguNameLabel]
 	if doguName == "" {
+		return ""
+	}
+
+	return doguName + migrationSecretSuffix
+}
+
+// Credentials returns the credentials stored in the migration secret <doguname>-migration of the SARE's dogu.
+func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (map[string]string, error) {
+	secretName := MigrationSecretName(sare)
+	if secretName == "" {
 		return nil, nil
 	}
 
-	secretName := doguName + migrationSecretSuffix
 	var secret corev1.Secret
 	err := ms.client.Get(ctx, types.NamespacedName{Namespace: sare.Namespace, Name: secretName}, &secret)
 	if apierrors.IsNotFound(err) {

@@ -119,7 +119,12 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		return ctrl.Result{}, nil
 	}
 
-	if err := serviceAccountReady(ctx, c.client, sare, result.secretName, result.isRotation); err != nil {
+	if result.migrated {
+		err = serviceAccountMigrated(ctx, c.client, sare, result.secretName)
+	} else {
+		err = serviceAccountReady(ctx, c.client, sare, result.secretName, result.isRotation)
+	}
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
@@ -130,6 +135,7 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 type createOrUpdateResult struct {
 	secretName string
 	isRotation bool
+	migrated   bool
 	abort      bool
 }
 
@@ -156,7 +162,14 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 		return abortedCreateOrUpdate, err
 	}
 
-	credentials, err := c.migrateOrRequestCredentials(ctx, sare, sapr, secretExists, logger)
+	if !secretExists {
+		result, err := c.migrateCredentials(ctx, sare, sapr, logger)
+		if err != nil || result.migrated {
+			return result, err
+		}
+	}
+
+	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
 	if err != nil {
 		return abortedCreateOrUpdate, err
 	}
@@ -222,21 +235,26 @@ func createdOrUpdated(secretExists bool) string {
 	return createOrUpdateString
 }
 
-// migrateOrRequestCredentials takes the credentials from the migration secret of a consumer dogu. Otherwise, it requests them from the producer.
-func (c *Controller) migrateOrRequestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool, logger logr.Logger) (map[string]string, error) {
-	if !secretExists {
-		credentials, err := c.migrationSource.Credentials(ctx, sare)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read migrated credentials: %w", err)
-		}
-
-		if len(credentials) > 0 {
-			logger.Info("taking over migrated service account credentials instead of requesting them from the producer", "producer", sare.Spec.Producer)
-			return credentials, nil
-		}
+// migrateCredentials stores the credentials from the migration secret of a consumer dogu migrated from Dogu V2 without calling the producer.
+func (c *Controller) migrateCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, logger logr.Logger) (createOrUpdateResult, error) {
+	credentials, err := c.migrationSource.Credentials(ctx, sare)
+	if err != nil {
+		return abortedCreateOrUpdate, fmt.Errorf("failed to read migrated credentials: %w", err)
 	}
 
-	return c.requestCredentials(ctx, sare, sapr, secretExists)
+	if len(credentials) == 0 {
+		return createOrUpdateResult{}, nil
+	}
+
+	logger.Info("taking over migrated service account credentials instead of requesting them from the producer", "producer", sare.Spec.Producer)
+	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+	if err != nil {
+		return abortedCreateOrUpdate, fmt.Errorf("failed to store migrated credentials in Kubernetes secret: %w", err)
+	}
+
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountMigrated", "Migrated service account %q from secret %q", sare.Spec.Consumer, sa.MigrationSecretName(sare))
+
+	return createOrUpdateResult{secretName: secretName, migrated: true}, nil
 }
 
 func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {

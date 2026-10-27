@@ -587,6 +587,7 @@ func TestController_Reconcile(t *testing.T) {
 		require.NotNil(t, saCond)
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
 		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyCreated, saCond.Reason)
+		assert.NotEmpty(t, updated.Status.LastRotation)
 	})
 	t.Run("should successfully set rotation watcher if rotation is enabled", func(t *testing.T) {
 		scheme := newTestScheme(t)
@@ -692,7 +693,8 @@ func TestController_Reconcile(t *testing.T) {
 		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
 		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(sare), migratedCredentials).Return("baseline-to-nexus", nil)
 
-		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"baseline\""})
+		recorder := newMockEventRecorder(t)
+		recorder.EXPECT().Eventf(matchSAPR(sapr), matchSARE(sare), corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountMigrated", "Migrated service account %q from secret %q", "baseline", "baseline-migration").Return()
 		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
 		defer cleanup()
 		controller.producerClientFactory = newMockProducerClientFactory(t)
@@ -711,6 +713,8 @@ func TestController_Reconcile(t *testing.T) {
 		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, saCond)
 		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+		assert.Equal(t, "ServiceAccountMigrated", saCond.Reason)
+		assert.Empty(t, updated.Status.LastRotation)
 	})
 
 	t.Run("should request credentials from the producer when there is nothing to migrate", func(t *testing.T) {

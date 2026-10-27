@@ -102,6 +102,26 @@ func TestServiceAccountReady(t *testing.T) {
 	})
 }
 
+func TestServiceAccountMigrated(t *testing.T) {
+	t.Run("should set ServiceAccountReady=True with ServiceAccountMigrated reason without rotation and persist to cluster", func(t *testing.T) {
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusClient(t, sare)
+
+		err := serviceAccountMigrated(testCtx, rtClient, sare, "baseline-to-nexus")
+
+		require.NoError(t, err)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, "ServiceAccountMigrated", cond.Reason)
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "baseline-to-nexus", updated.Status.SecretRef.Name)
+		assert.Empty(t, updated.Status.LastRotation)
+	})
+}
+
 func TestServiceAccountFailed(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with error message and persist to cluster", func(t *testing.T) {
 		sare := createTestSare()
