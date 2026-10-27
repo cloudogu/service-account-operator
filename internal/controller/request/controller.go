@@ -39,6 +39,7 @@ const (
 type Controller struct {
 	client                k8sClient
 	secretManager         secretManager
+	migrationSource       migrationSource
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
 	eventRecorder         eventRecorder
@@ -57,6 +58,7 @@ func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.Oper
 	return &Controller{
 		client:                rtClient,
 		secretManager:         sa.NewSecretManager(rtClient, scheme),
+		migrationSource:       sa.NewMigrationSource(rtClient),
 		producerClientFactory: producer.NewClientFactory(rtClient),
 		operatorConfig:        operatorConfig,
 		eventRecorder:         eventRecorder,
@@ -154,7 +156,7 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 		return abortedCreateOrUpdate, err
 	}
 
-	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
+	credentials, err := c.migrateOrRequestCredentials(ctx, sare, sapr, secretExists, logger)
 	if err != nil {
 		return abortedCreateOrUpdate, err
 	}
@@ -218,6 +220,23 @@ func createdOrUpdated(secretExists bool) string {
 		createOrUpdateString = "updated"
 	}
 	return createOrUpdateString
+}
+
+// migrateOrRequestCredentials takes the credentials from the migration secret of a consumer dogu. Otherwise, it requests them from the producer.
+func (c *Controller) migrateOrRequestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool, logger logr.Logger) (map[string]string, error) {
+	if !secretExists {
+		credentials, err := c.migrationSource.Credentials(ctx, sare)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read migrated credentials: %w", err)
+		}
+
+		if len(credentials) > 0 {
+			logger.Info("taking over migrated service account credentials instead of requesting them from the producer", "producer", sare.Spec.Producer)
+			return credentials, nil
+		}
+	}
+
+	return c.requestCredentials(ctx, sare, sapr, secretExists)
 }
 
 func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {

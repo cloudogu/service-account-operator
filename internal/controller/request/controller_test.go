@@ -673,6 +673,170 @@ func TestController_Reconcile(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to set cron watcher for SARE \"grafana-to-prometheus-ecosystem\"")
 	})
 
+	t.Run("should store credentials from the migration secret without calling the producer", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		sapr := createTestNexusSapr()
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		migratedCredentials := map[string]string{"username": "baseline-user", "password": "migrated-pass"}
+		migrationSourceMock := newMockMigrationSource(t)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(migratedCredentials, nil)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(sare), migratedCredentials).Return("baseline-to-nexus", nil)
+
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"baseline\""})
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = newMockProducerClientFactory(t)
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = migrationSourceMock
+
+		result, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.NoError(t, err)
+		assert.Equal(t, ctrl.Result{}, result)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "baseline-to-nexus", Namespace: "ecosystem"}, &updated))
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "baseline-to-nexus", updated.Status.SecretRef.Name)
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionTrue, saCond.Status)
+	})
+
+	t.Run("should request credentials from the producer when there is nothing to migrate", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestNexusSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		migrationSourceMock := newMockMigrationSource(t)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(nil, nil)
+
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "baseline-user", "password": "pass"}, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestNexusSapr())).Return(httpClientMock, nil)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
+		secretMgrMock.EXPECT().CreateOrUpdate(testCtx, matchSARE(sare), map[string]string{"username": "baseline-user", "password": "pass"}).Return("baseline-to-nexus", nil)
+
+		recorder := newFakeRecorder(t, []string{"Normal ServiceAccountRequest Created service account \"baseline\""})
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = migrationSourceMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.NoError(t, err)
+	})
+
+	t.Run("should not call the migration source when the secret already exists", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestNexusSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		httpClientMock := newMockServiceAccountClient(t)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{}).Return(nil, nil)
+		factoryMock := newMockProducerClientFactory(t)
+		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestNexusSapr())).Return(httpClientMock, nil)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(true, sare.Name, nil)
+
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = factoryMock
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = newMockMigrationSource(t)
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.NoError(t, err)
+	})
+
+	t.Run("should not call the migration source when the producer is not found", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
+		secretMgrMock.EXPECT().Delete(testCtx, matchSARE(sare)).Return(nil)
+
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = newMockMigrationSource(t)
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "required producer \"nexus\" not found")
+	})
+
+	t.Run("should return error and set ServiceAccountReady=False when reading the migration secret fails", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, createTestNexusSapr()).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		migrationSourceMock := newMockMigrationSource(t)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(nil, assert.AnError)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
+
+		recorder := newFakeRecorder(t, nil)
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = newMockProducerClientFactory(t)
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = migrationSourceMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.ErrorIs(t, err, assert.AnError)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "baseline-to-nexus", Namespace: "ecosystem"}, &updated))
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionFalse, saCond.Status)
+	})
+
 	t.Run("should not update secret if the credentials did not change", func(t *testing.T) {
 		scheme := newTestScheme(t)
 		sare := createTestSare()
@@ -1376,6 +1540,22 @@ func createTestSapr() *serviceaccountv2.ServiceAccountProducer {
 			},
 		},
 	}
+}
+
+func createTestMigratingSare() *serviceaccountv2.ServiceAccountRequest {
+	sare := createTestSare()
+	sare.Name = "baseline-to-nexus"
+	sare.Labels = map[string]string{"k8s.cloudogu.com/dogu.name": "baseline"}
+	sare.Spec.Consumer = "baseline"
+	sare.Spec.Producer = "nexus"
+	return sare
+}
+
+func createTestNexusSapr() *serviceaccountv2.ServiceAccountProducer {
+	sapr := createTestSapr()
+	sapr.Name = "nexus"
+	sapr.Spec.Producer = "nexus"
+	return sapr
 }
 
 func TestController_rotateSaSecretFunc(t *testing.T) {
