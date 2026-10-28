@@ -134,6 +134,7 @@ void stageSmokeTest(Makefile makefile) {
         String controllerVersion = makefile.getVersion()
 
         stage('Set up k3d cluster') {
+            k3d.installHelmManually()
             k3d.startK3d()
         }
 
