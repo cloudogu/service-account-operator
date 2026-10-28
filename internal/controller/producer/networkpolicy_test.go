@@ -75,6 +75,7 @@ func Test_defaultNetworkPolicyUpserter_UpsertNetworkPolicy(t *testing.T) {
 			name: "netpols enabled: should fail to parse endpoint url",
 			fields: fields{
 				netpolsEnabled: true,
+				k8sClient:      fake.NewClientBuilder().Build(),
 			},
 			producer: &serviceaccountv2.ServiceAccountProducer{Name: "test", Namespace: "test",
 				Spec: serviceaccountv2.ServiceAccountProducerSpec{HTTP: &serviceaccountv2.HTTPProducer{Endpoint: "\x7f"}}},
@@ -278,10 +279,6 @@ func Test_defaultNetworkPolicyUpserter_UpsertNetworkPolicy(t *testing.T) {
 				selectorLabels: tt.fields.selectorLabels,
 			}
 			tt.wantErr(t, n.UpsertNetworkPolicy(t.Context(), tt.producer))
-
-			if n.k8sClient == nil {
-				return
-			}
 
 			actual := &networkingv1.NetworkPolicy{}
 			err := n.k8sClient.Get(t.Context(), types.NamespacedName{Name: fmt.Sprintf("%s-sa-manager", tt.producer.Name), Namespace: tt.producer.Namespace}, actual)
