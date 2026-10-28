@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - [#16] Request service accounts from producers under `spec.consumer` instead of `<consumer>-<namespace>`
+- [#16] Update to Go 1.27.3 and update dependencies
 
 ## [v1.0.0] - 2026-07-09
 **Heads-up: Breaking Change ahead**
