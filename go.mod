@@ -1,6 +1,6 @@
 module github.com/cloudogu/service-account-operator
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/adhocore/gronx v1.20.5
@@ -9,6 +9,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/text v0.43.0
+	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.1
