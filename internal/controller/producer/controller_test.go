@@ -62,9 +62,12 @@ func TestController_Reconcile(t *testing.T) {
 		controller.clientFactory = newMockClientFactory(t)
 		controller.netpolUpserter = upserter
 
-		result, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
-		require.NoError(t, err)
-		assert.Equal(t, reconcileInterval, result.RequeueAfter)
+		_, err := controller.Reconcile(testCtx, reconcileRequest("example-producer", "default"))
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		errMsg := "failed to upsert network policy for producer default/example-producer"
+		assert.ErrorContains(t, err, errMsg)
 
 		readyCond := readyCondition(t, rtClient, "example-producer", "default")
 		require.NotNil(t, readyCond)
@@ -76,7 +79,8 @@ func TestController_Reconcile(t *testing.T) {
 		require.NotNil(t, netpolCond)
 		assert.Equal(t, metav1.ConditionFalse, netpolCond.Status)
 		assert.Equal(t, reasonNetworkPolicyFailed, netpolCond.Reason)
-		assert.Equal(t, assert.AnError.Error(), netpolCond.Message)
+		assert.Contains(t, netpolCond.Message, assert.AnError.Error())
+		assert.Contains(t, netpolCond.Message, errMsg)
 	})
 
 	t.Run("should return error when status.notReady write fails for netpols", func(t *testing.T) {
