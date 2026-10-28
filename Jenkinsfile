@@ -11,7 +11,7 @@ github = new GitHub(this, git)
 changelog = new Changelog(this)
 Docker docker = new Docker(this)
 gpg = new Gpg(this, docker)
-goVersion = "1.26.2"
+goVersion = "1.27.3"
 Makefile makefile = new Makefile(this)
 
 repositoryOwner = "cloudogu"

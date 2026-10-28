@@ -3,19 +3,28 @@ package producer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
+	"github.com/cloudogu/service-account-operator/internal/config"
 	producerclient "github.com/cloudogu/service-account-operator/internal/producer"
+	networkingv1 "k8s.io/api/networking/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 // serviceAccountClient manages service accounts on a specific producer.
 // Defined here for mock generation.
 type serviceAccountClient interface { //nolint:unused
 	producerclient.ServiceAccountClient
+}
+
+type networkPolicyUpserter interface {
+	UpsertNetworkPolicy(ctx context.Context, producer *serviceaccountv2.ServiceAccountProducer) error
 }
 
 // clientFactory builds a client for a given ServiceAccountProducer, resolving the API key
@@ -29,13 +38,19 @@ type Controller struct {
 	client            client.Client
 	clientFactory     clientFactory
 	reconcileInterval time.Duration
+	netpolUpserter    networkPolicyUpserter
 }
 
-func New(rtClient client.Client, reconcileInterval time.Duration) *Controller {
+func New(rtClient client.Client, operatorConfig *config.OperatorConfig) *Controller {
 	return &Controller{
 		client:            rtClient,
 		clientFactory:     producerclient.NewClientFactory(rtClient),
-		reconcileInterval: reconcileInterval,
+		reconcileInterval: operatorConfig.ProducerReconcileInterval,
+		netpolUpserter: &defaultNetworkPolicyUpserter{
+			netpolsEnabled: operatorConfig.NetworkPoliciesEnabled,
+			k8sClient:      rtClient,
+			selectorLabels: operatorConfig.SelectorLabels,
+		},
 	}
 }
 
@@ -47,6 +62,20 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	var sapr serviceaccountv2.ServiceAccountProducer
 	if err := c.client.Get(ctx, req.NamespacedName, &sapr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if upsertErr := c.netpolUpserter.UpsertNetworkPolicy(ctx, &sapr); upsertErr != nil {
+		logger.Error(upsertErr, "failed to upsert network policy")
+		upsertErr = fmt.Errorf("failed to upsert network policy for producer %s: %w", req.NamespacedName, upsertErr)
+		if err := markNetpolFailed(ctx, c.client, &sapr, upsertErr.Error()); err != nil {
+			return ctrl.Result{}, errors.Join(upsertErr, fmt.Errorf("failed to mark network policy as failed: %w", err))
+		}
+
+		return ctrl.Result{}, upsertErr
+	}
+
+	if err := markNetpolUpserted(ctx, c.client, &sapr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to mark network policy for producer %s as upserted: %w", req.NamespacedName, err)
 	}
 
 	if reason, checkErr := c.checkReady(ctx, &sapr); checkErr != nil {
@@ -88,6 +117,7 @@ func (c *Controller) checkReady(ctx context.Context, sapr *serviceaccountv2.Serv
 func (c *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&serviceaccountv2.ServiceAccountProducer{}).
+		Owns(&networkingv1.NetworkPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("serviceaccountproducer").
 		Complete(c)
 }
