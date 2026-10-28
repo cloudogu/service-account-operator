@@ -3,6 +3,7 @@ package producer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
@@ -64,16 +65,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if upsertErr := c.netpolUpserter.UpsertNetworkPolicy(ctx, &sapr); upsertErr != nil {
-		logger.Info("failed to upsert network policy", "error", upsertErr.Error())
+		logger.Error(upsertErr, "failed to upsert network policy")
 		if err := markNetpolFailed(ctx, c.client, &sapr, upsertErr.Error()); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to mark network policy as failed: %w", err)
 		}
 
 		return ctrl.Result{RequeueAfter: c.reconcileInterval}, nil
 	}
 
 	if err := markNetpolUpserted(ctx, c.client, &sapr); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to mark network policy as upserted: %w", err)
 	}
 
 	if reason, checkErr := c.checkReady(ctx, &sapr); checkErr != nil {

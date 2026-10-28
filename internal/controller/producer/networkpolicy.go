@@ -16,9 +16,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-var managedResourceLabels = map[string]string{
-	"app":                          "ces",
-	"app.kubernetes.io/managed-by": "service-account-operator",
+func managedResourceLabels() map[string]string {
+	return map[string]string{
+		"app":                          "ces",
+		"app.kubernetes.io/managed-by": "service-account-operator",
+	}
 }
 
 type defaultNetworkPolicyUpserter struct {
@@ -79,7 +81,7 @@ func (n *defaultNetworkPolicyUpserter) generate(ctx context.Context, name string
 	netpol := &networkingv1.NetworkPolicy{
 		Name:      name,
 		Namespace: producer.Namespace,
-		Labels:    managedResourceLabels,
+		Labels:    managedResourceLabels(),
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: service.Spec.Selector},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},

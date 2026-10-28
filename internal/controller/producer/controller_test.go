@@ -37,13 +37,8 @@ func TestController_Reconcile(t *testing.T) {
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = factory
 		controller.netpolUpserter = upserter
 
@@ -62,13 +57,8 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := newClientWith(t, sapr)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(assert.AnError)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = newMockClientFactory(t)
 		controller.netpolUpserter = upserter
 
@@ -104,13 +94,8 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(assert.AnError)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = newMockClientFactory(t)
 		controller.netpolUpserter = upserter
 
@@ -135,13 +120,8 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = newMockClientFactory(t)
 		controller.netpolUpserter = upserter
 
@@ -160,13 +140,8 @@ func TestController_Reconcile(t *testing.T) {
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = factory
 		controller.netpolUpserter = upserter
 
@@ -188,13 +163,8 @@ func TestController_Reconcile(t *testing.T) {
 			Return(nil, errors.New("failed to get auth secret"))
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = factory
 		controller.netpolUpserter = upserter
 
@@ -214,13 +184,8 @@ func TestController_Reconcile(t *testing.T) {
 		rtClient := newClientWith(t, sapr)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.netpolUpserter = upserter
 		// The factory is never consulted because the configuration is rejected first.
 		controller.clientFactory = newMockClientFactory(t)
@@ -260,13 +225,8 @@ func TestController_Reconcile(t *testing.T) {
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = factory
 		controller.netpolUpserter = upserter
 
@@ -301,13 +261,8 @@ func TestController_Reconcile(t *testing.T) {
 		factory.EXPECT().NewForProducer(testCtx, "default", matchSAPR(sapr)).Return(saClient, nil)
 		upserter := newMockNetworkPolicyUpserter(t)
 		upserter.EXPECT().UpsertNetworkPolicy(testCtx, matchSAPR(sapr)).Return(nil)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
 
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = factory
 		controller.netpolUpserter = upserter
 
@@ -319,12 +274,7 @@ func TestController_Reconcile(t *testing.T) {
 
 	t.Run("should ignore not found", func(t *testing.T) {
 		rtClient := newClientWith(t)
-		cfg := config.OperatorConfig{
-			ProducerReconcileInterval: reconcileInterval,
-			NetworkPoliciesEnabled:    false,
-			SelectorLabels:            map[string]string{"foo": "bar"},
-		}
-		controller := New(rtClient, &cfg)
+		controller := New(rtClient, newTestOperatorConfig())
 		controller.clientFactory = newMockClientFactory(t)
 		controller.netpolUpserter = newMockNetworkPolicyUpserter(t)
 
@@ -332,6 +282,14 @@ func TestController_Reconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ctrl.Result{}, result)
 	})
+}
+
+func newTestOperatorConfig() *config.OperatorConfig {
+	return &config.OperatorConfig{
+		ProducerReconcileInterval: reconcileInterval,
+		NetworkPoliciesEnabled:    false,
+		SelectorLabels:            map[string]string{"foo": "bar"},
+	}
 }
 
 func matchSAPR(sapr *serviceaccountv2.ServiceAccountProducer) any {
