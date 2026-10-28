@@ -66,15 +66,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if upsertErr := c.netpolUpserter.UpsertNetworkPolicy(ctx, &sapr); upsertErr != nil {
 		logger.Error(upsertErr, "failed to upsert network policy")
+		upsertErr = fmt.Errorf("failed to upsert network policy for producer %s: %w", req.NamespacedName, upsertErr)
 		if err := markNetpolFailed(ctx, c.client, &sapr, upsertErr.Error()); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to mark network policy as failed: %w", err)
+			return ctrl.Result{}, errors.Join(upsertErr, fmt.Errorf("failed to mark network policy as failed: %w", err))
 		}
 
-		return ctrl.Result{RequeueAfter: c.reconcileInterval}, nil
+		return ctrl.Result{}, upsertErr
 	}
 
 	if err := markNetpolUpserted(ctx, c.client, &sapr); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to mark network policy as upserted: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to mark network policy for producer %s as upserted: %w", req.NamespacedName, err)
 	}
 
 	if reason, checkErr := c.checkReady(ctx, &sapr); checkErr != nil {
