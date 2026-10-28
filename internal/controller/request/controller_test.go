@@ -31,11 +31,10 @@ import (
 )
 
 const (
-	testNamespace         = "ecosystem"
-	testReqName           = "grafana"
-	testPrName            = "prometheus"
-	testConsumer          = "grafana"
-	testQualifiedConsumer = "grafana-ecosystem"
+	testNamespace = "ecosystem"
+	testReqName   = "grafana"
+	testPrName    = "prometheus"
+	testConsumer  = "grafana"
 )
 
 var (
@@ -315,7 +314,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, errors.New("connection refused"))
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, errors.New("connection refused"))
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 		recorder := newFakeRecorder(t, nil)
@@ -390,7 +389,7 @@ func TestController_Reconcile(t *testing.T) {
 			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
@@ -458,7 +457,7 @@ func TestController_Reconcile(t *testing.T) {
 			}).
 			Build()
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"key": "val"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
@@ -530,7 +529,7 @@ func TestController_Reconcile(t *testing.T) {
 
 		httpClientMock := newMockServiceAccountClient(t)
 		httpClientMock.EXPECT().
-			CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}, producerclient.BehaviorParams{RotateServiceAccountNow: true}).
+			CreateOrUpdate(testCtx, "grafana", producerclient.Params{"readOnly": "true", "scrapeInterval": "30s"}, producerclient.BehaviorParams{RotateServiceAccountNow: true}).
 			Return(map[string]string{"apiKey": "abc"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
@@ -559,7 +558,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 
@@ -601,7 +600,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "grafana-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 
@@ -731,7 +730,7 @@ func TestController_Reconcile(t *testing.T) {
 		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare), matchSAPR(createTestNexusSapr())).Return(nil, nil)
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "baseline-user", "password": "pass"}, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "baseline-user", "password": "pass"}, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestNexusSapr())).Return(httpClientMock, nil)
 
@@ -762,7 +761,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{}).Return(nil, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline", producerclient.Params(nil), producerclient.BehaviorParams{}).Return(nil, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestNexusSapr())).Return(httpClientMock, nil)
 
@@ -892,7 +891,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		httpClientMock := newMockServiceAccountClient(t)
-		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, nil)
+		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "grafana", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(nil, nil)
 		factoryMock := newMockProducerClientFactory(t)
 		factoryMock.EXPECT().NewForProducer(testCtx, "ecosystem", matchSAPR(createTestSapr())).Return(httpClientMock, nil)
 
@@ -1454,9 +1453,9 @@ func mockProducerFactory(t *testing.T, sapr *serviceaccountv2.ServiceAccountProd
 	}
 
 	saClient := newMockServiceAccountClient(t)
-	saClient.EXPECT().Exists(mock.Anything, testQualifiedConsumer).Return(exists, existsErr)
+	saClient.EXPECT().Exists(mock.Anything, testConsumer).Return(exists, existsErr)
 	if existsErr == nil && exists {
-		saClient.EXPECT().Delete(mock.Anything, testQualifiedConsumer).Return(deleteErr)
+		saClient.EXPECT().Delete(mock.Anything, testConsumer).Return(deleteErr)
 	}
 
 	factory.EXPECT().NewForProducer(mock.Anything, testNamespace, sapr).Return(saClient, nil)

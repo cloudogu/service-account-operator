@@ -276,7 +276,7 @@ func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccoun
 		behaviorParams.RotateServiceAccountNow = true
 	}
 
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
+	credentials, err := saClient.CreateOrUpdate(ctx, sare.Spec.Consumer, sare.Spec.Params, behaviorParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err)
 	}
@@ -441,7 +441,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		return err
 	}
 
-	consumer := qualifiedConsumer(sare)
+	consumer := sare.Spec.Consumer
 	exists, err := saClient.Exists(ctx, consumer)
 	if err != nil {
 		return fmt.Errorf("failed to check if service account %q exists at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
@@ -550,12 +550,6 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 	}
 
 	return requests
-}
-
-// qualifiedConsumer returns a namespace-qualified consumer name to ensure uniqueness across namespaces.
-// For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
-func qualifiedConsumer(sare *serviceaccountv2.ServiceAccountRequest) string {
-	return sare.Spec.Consumer + "-" + sare.Namespace
 }
 
 // namespacedName returns a namespace-qualified SARE name to ensure uniqueness across namespaces. The resource name's

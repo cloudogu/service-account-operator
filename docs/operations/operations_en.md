@@ -69,8 +69,9 @@ Other errors while reading the migration secret lead to reason `ServiceAccountFa
 ### Requirement for producers
 
 The Service Account Operator does not call the producer during a migration and afterwards treats migrated service accounts like all others.
-Producers must therefore migrate their V2 accounts themselves so that they are known under the consumer `<consumer>-<namespace>` (e.g. `baseline-ecosystem`).
+It requests service accounts from the producer under the SARE's `spec.consumer` (e.g. `baseline`), which is usually the same name as in Dogu V2.
+Producers must therefore keep their V2 accounts under this name.
 
-Otherwise, the next reconcile with an existing service account secret (e.g. after a change of the SARE spec or a restart of the operator) sends a request for `<consumer>-<namespace>` to the producer.
+Otherwise, the next reconcile with an existing service account secret (e.g. after a change of the SARE spec or a restart of the operator) sends a request for an account the producer does not know.
 The producer creates a new account, and the operator overwrites the migrated credentials with it.
 The old V2 account remains orphaned at the producer and is not removed when the SARE is deleted.

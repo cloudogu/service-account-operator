@@ -72,8 +72,9 @@ Andere Fehler beim Lesen des Migration-Secrets führen zu Reason `ServiceAccount
 ### Anforderung an Producer
 
 Der Service-Account-Operator ruft den Producer bei einer Migration nicht auf und behandelt migrierte Service-Accounts danach wie alle anderen.
-Producer müssen ihre V2-Accounts deshalb selbst so migrieren, dass sie unter dem Consumer `<consumer>-<namespace>` (z. B. `baseline-ecosystem`) bekannt sind.
+Er fragt Service-Accounts beim Producer unter `spec.consumer` des SARE an (z. B. `baseline`), in der Regel also unter demselben Namen wie in Dogu V2.
+Producer müssen ihre V2-Accounts deshalb unter diesem Namen weiterführen.
 
-Andernfalls schickt der nächste Reconcile mit vorhandenem Service-Account-Secret (z. B. nach einer Änderung der SARE-Spec oder einem Neustart des Operators) eine Anfrage für `<consumer>-<namespace>` an den Producer.
+Andernfalls schickt der nächste Reconcile mit vorhandenem Service-Account-Secret (z. B. nach einer Änderung der SARE-Spec oder einem Neustart des Operators) eine Anfrage für einen Account an den Producer, den dieser nicht kennt.
 Der legt einen neuen Account an, und der Operator überschreibt die migrierten Credentials damit.
 Der alte V2-Account bleibt beim Producer verwaist und wird beim Löschen des SARE nicht entfernt.

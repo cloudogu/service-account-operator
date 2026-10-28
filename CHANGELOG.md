@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Before, this network policy had to be provided by each producer
 - [#16] Take over service account credentials from the migration secret `<doguname>-migration` when a Dogu is migrated from Dogu V2
 
+### Changed
+- [#16] Request service accounts from producers under `spec.consumer` instead of `<consumer>-<namespace>`
+
 ## [v1.0.0] - 2026-07-09
 **Heads-up: Breaking Change ahead**
 
