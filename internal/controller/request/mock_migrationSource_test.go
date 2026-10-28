@@ -22,9 +22,9 @@ func (_m *mockMigrationSource) EXPECT() *mockMigrationSource_Expecter {
 	return &mockMigrationSource_Expecter{mock: &_m.Mock}
 }
 
-// Credentials provides a mock function with given fields: ctx, sare
-func (_m *mockMigrationSource) Credentials(ctx context.Context, sare *v2.ServiceAccountRequest) (map[string]string, error) {
-	ret := _m.Called(ctx, sare)
+// Credentials provides a mock function with given fields: ctx, sare, sapr
+func (_m *mockMigrationSource) Credentials(ctx context.Context, sare *v2.ServiceAccountRequest, sapr *v2.ServiceAccountProducer) (map[string]string, error) {
+	ret := _m.Called(ctx, sare, sapr)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Credentials")
@@ -32,19 +32,19 @@ func (_m *mockMigrationSource) Credentials(ctx context.Context, sare *v2.Service
 
 	var r0 map[string]string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) (map[string]string, error)); ok {
-		return rf(ctx, sare)
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest, *v2.ServiceAccountProducer) (map[string]string, error)); ok {
+		return rf(ctx, sare, sapr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest) map[string]string); ok {
-		r0 = rf(ctx, sare)
+	if rf, ok := ret.Get(0).(func(context.Context, *v2.ServiceAccountRequest, *v2.ServiceAccountProducer) map[string]string); ok {
+		r0 = rf(ctx, sare, sapr)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest) error); ok {
-		r1 = rf(ctx, sare)
+	if rf, ok := ret.Get(1).(func(context.Context, *v2.ServiceAccountRequest, *v2.ServiceAccountProducer) error); ok {
+		r1 = rf(ctx, sare, sapr)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -60,13 +60,14 @@ type mockMigrationSource_Credentials_Call struct {
 // Credentials is a helper method to define mock.On call
 //   - ctx context.Context
 //   - sare *v2.ServiceAccountRequest
-func (_e *mockMigrationSource_Expecter) Credentials(ctx interface{}, sare interface{}) *mockMigrationSource_Credentials_Call {
-	return &mockMigrationSource_Credentials_Call{Call: _e.mock.On("Credentials", ctx, sare)}
+//   - sapr *v2.ServiceAccountProducer
+func (_e *mockMigrationSource_Expecter) Credentials(ctx interface{}, sare interface{}, sapr interface{}) *mockMigrationSource_Credentials_Call {
+	return &mockMigrationSource_Credentials_Call{Call: _e.mock.On("Credentials", ctx, sare, sapr)}
 }
 
-func (_c *mockMigrationSource_Credentials_Call) Run(run func(ctx context.Context, sare *v2.ServiceAccountRequest)) *mockMigrationSource_Credentials_Call {
+func (_c *mockMigrationSource_Credentials_Call) Run(run func(ctx context.Context, sare *v2.ServiceAccountRequest, sapr *v2.ServiceAccountProducer)) *mockMigrationSource_Credentials_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*v2.ServiceAccountRequest))
+		run(args[0].(context.Context), args[1].(*v2.ServiceAccountRequest), args[2].(*v2.ServiceAccountProducer))
 	})
 	return _c
 }
@@ -76,7 +77,7 @@ func (_c *mockMigrationSource_Credentials_Call) Return(_a0 map[string]string, _a
 	return _c
 }
 
-func (_c *mockMigrationSource_Credentials_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest) (map[string]string, error)) *mockMigrationSource_Credentials_Call {
+func (_c *mockMigrationSource_Credentials_Call) RunAndReturn(run func(context.Context, *v2.ServiceAccountRequest, *v2.ServiceAccountProducer) (map[string]string, error)) *mockMigrationSource_Credentials_Call {
 	_c.Call.Return(run)
 	return _c
 }

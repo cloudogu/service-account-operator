@@ -114,6 +114,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
 	result, err := c.createOrUpdate(ctx, sare)
 	if err != nil {
+		if errors.Is(err, sa.ErrIncompleteMigrationSecret) {
+			return ctrl.Result{}, c.failWithReason(ctx, sare, conditionReasonMigrationFailed, err)
+		}
+
 		return ctrl.Result{}, c.fail(ctx, sare, err)
 	} else if result.abort {
 		return ctrl.Result{}, nil
@@ -237,8 +241,12 @@ func createdOrUpdated(secretExists bool) string {
 
 // migrateCredentials stores the credentials from the migration secret of a consumer dogu migrated from Dogu V2 without calling the producer.
 func (c *Controller) migrateCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, logger logr.Logger) (createOrUpdateResult, error) {
-	credentials, err := c.migrationSource.Credentials(ctx, sare)
+	credentials, err := c.migrationSource.Credentials(ctx, sare, sapr)
 	if err != nil {
+		if errors.Is(err, sa.ErrIncompleteMigrationSecret) {
+			c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeWarning, "ServiceAccountRequest", "MigrationFailed", "Failed to migrate service account %q: %s", sare.Spec.Consumer, err.Error())
+		}
+
 		return abortedCreateOrUpdate, fmt.Errorf("failed to read migrated credentials: %w", err)
 	}
 

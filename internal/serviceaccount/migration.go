@@ -2,7 +2,9 @@ package serviceaccount
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	serviceaccountv2 "github.com/cloudogu/k8s-serviceaccount-lib/v2/api/v2"
@@ -16,6 +18,9 @@ const (
 	migrationSecretSuffix = "-migration"
 	migrationKeySeparator = "_"
 )
+
+// ErrIncompleteMigrationSecret is returned when the migration secret does not have all keys the producer returns.
+var ErrIncompleteMigrationSecret = errors.New("migration secret is incomplete")
 
 // MigrationSource reads service account credentials of a consumer dogu migrated from Dogu V2 from its migration secret.
 type MigrationSource struct {
@@ -38,7 +43,7 @@ func MigrationSecretName(sare *serviceaccountv2.ServiceAccountRequest) string {
 }
 
 // Credentials returns the credentials stored in the migration secret <doguname>-migration of the SARE's dogu.
-func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (map[string]string, error) {
+func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (map[string]string, error) {
 	secretName := MigrationSecretName(sare)
 	if secretName == "" {
 		return nil, nil
@@ -60,5 +65,31 @@ func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccount
 		}
 	}
 
+	if len(credentials) == 0 {
+		return credentials, nil
+	}
+
+	var missingKeys []string
+	for attribute := range returnedAttributes(sapr) {
+		if _, ok := credentials[string(attribute)]; !ok {
+			missingKeys = append(missingKeys, prefix+string(attribute))
+		}
+	}
+
+	if len(missingKeys) > 0 {
+		slices.Sort(missingKeys)
+		return nil, fmt.Errorf("%w: secret %q lacks keys %s", ErrIncompleteMigrationSecret, secretName, strings.Join(missingKeys, ", "))
+	}
+
 	return credentials, nil
+}
+
+// returnedAttributes returns the attributes the producer declares in its return definition.
+// Only the HTTP strategy is implemented.
+func returnedAttributes(sapr *serviceaccountv2.ServiceAccountProducer) map[serviceaccountv2.AttributeName]serviceaccountv2.ProducerReturnDefinition {
+	if sapr.Spec.HTTP == nil {
+		return nil
+	}
+
+	return sapr.Spec.HTTP.Return
 }

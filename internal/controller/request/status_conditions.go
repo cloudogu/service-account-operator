@@ -31,6 +31,9 @@ func serviceAccountReady(ctx context.Context, c client.Client, sare *serviceacco
 // conditionReasonServiceAccountMigrated is defined locally until it is needed in k8s-serviceaccount-lib.
 const conditionReasonServiceAccountMigrated = "ServiceAccountMigrated"
 
+// conditionReasonMigrationFailed is defined locally until it is needed in k8s-serviceaccount-lib.
+const conditionReasonMigrationFailed = "MigrationFailed"
+
 // serviceAccountMigrated records the created secret and sets ServiceAccountReady=True with reason "ServiceAccountMigrated".
 // A migration is no rotation, so lastRotation stays unset.
 func serviceAccountMigrated(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, secretName string) error {

@@ -687,7 +687,7 @@ func TestController_Reconcile(t *testing.T) {
 
 		migratedCredentials := map[string]string{"username": "baseline-user", "password": "migrated-pass"}
 		migrationSourceMock := newMockMigrationSource(t)
-		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(migratedCredentials, nil)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare), matchSAPR(createTestNexusSapr())).Return(migratedCredentials, nil)
 
 		secretMgrMock := newMockSecretManager(t)
 		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
@@ -728,7 +728,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		migrationSourceMock := newMockMigrationSource(t)
-		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(nil, nil)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare), matchSAPR(createTestNexusSapr())).Return(nil, nil)
 
 		httpClientMock := newMockServiceAccountClient(t)
 		httpClientMock.EXPECT().CreateOrUpdate(testCtx, "baseline-ecosystem", producerclient.Params(nil), producerclient.BehaviorParams{RotateServiceAccountNow: true}).Return(map[string]string{"username": "baseline-user", "password": "pass"}, nil)
@@ -818,7 +818,7 @@ func TestController_Reconcile(t *testing.T) {
 			Build()
 
 		migrationSourceMock := newMockMigrationSource(t)
-		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare)).Return(nil, assert.AnError)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare), matchSAPR(createTestNexusSapr())).Return(nil, assert.AnError)
 
 		secretMgrMock := newMockSecretManager(t)
 		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
@@ -839,6 +839,46 @@ func TestController_Reconcile(t *testing.T) {
 		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
 		require.NotNil(t, saCond)
 		assert.Equal(t, metav1.ConditionFalse, saCond.Status)
+		assert.Equal(t, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, saCond.Reason)
+	})
+
+	t.Run("should fail with reason MigrationFailed and neither store a secret nor call the producer when the migration secret is incomplete", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		sapr := createTestNexusSapr()
+		rtClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sare, sapr).
+			WithStatusSubresource(&serviceaccountv2.ServiceAccountRequest{}).
+			Build()
+
+		incompleteErr := fmt.Errorf("%w: secret %q lacks keys nexus_repository", sa.ErrIncompleteMigrationSecret, "baseline-migration")
+		migrationSourceMock := newMockMigrationSource(t)
+		migrationSourceMock.EXPECT().Credentials(testCtx, matchSARE(sare), matchSAPR(sapr)).Return(nil, incompleteErr)
+
+		secretMgrMock := newMockSecretManager(t)
+		secretMgrMock.EXPECT().Exists(testCtx, matchSARE(sare)).Return(false, sare.Name, nil)
+
+		recorder := newMockEventRecorder(t)
+		recorder.EXPECT().Eventf(matchSAPR(sapr), matchSARE(sare), corev1.EventTypeWarning, "ServiceAccountRequest", "MigrationFailed", "Failed to migrate service account %q: %s", "baseline", "migration secret is incomplete: secret \"baseline-migration\" lacks keys nexus_repository").Return()
+		controller, cleanup := New(rtClient, scheme, testOperatorConfig, recorder)
+		defer cleanup()
+		controller.producerClientFactory = newMockProducerClientFactory(t)
+		controller.secretManager = secretMgrMock
+		controller.migrationSource = migrationSourceMock
+
+		_, err := controller.Reconcile(testCtx, reconcileRequest("baseline-to-nexus", "ecosystem"))
+
+		require.ErrorIs(t, err, sa.ErrIncompleteMigrationSecret)
+
+		var updated serviceaccountv2.ServiceAccountRequest
+		require.NoError(t, rtClient.Get(testCtx, types.NamespacedName{Name: "baseline-to-nexus", Namespace: "ecosystem"}, &updated))
+		saCond := findCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, saCond)
+		assert.Equal(t, metav1.ConditionFalse, saCond.Status)
+		assert.Equal(t, "MigrationFailed", saCond.Reason)
+		assert.Contains(t, saCond.Message, "\"baseline-migration\" lacks keys nexus_repository")
 	})
 
 	t.Run("should not update secret if the credentials did not change", func(t *testing.T) {

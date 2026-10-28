@@ -19,7 +19,7 @@ type secretManager interface {
 
 // migrationSource provides the credentials of a consumer dogu migrated from Dogu V2.
 type migrationSource interface {
-	Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (map[string]string, error)
+	Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (map[string]string, error)
 }
 
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,

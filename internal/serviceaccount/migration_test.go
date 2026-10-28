@@ -21,7 +21,7 @@ func TestMigrationSource_Credentials(t *testing.T) {
 		sare.Labels = nil
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.NoError(t, err)
 		assert.Empty(t, credentials)
@@ -40,7 +40,7 @@ func TestMigrationSource_Credentials(t *testing.T) {
 			}).
 			Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.NoError(t, err)
 		assert.Empty(t, credentials)
@@ -56,10 +56,67 @@ func TestMigrationSource_Credentials(t *testing.T) {
 		})
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(migrationSecret).Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"username": "baseline-user", "password": "secret"}, credentials)
+	})
+
+	t.Run("should return the credentials when the migration secret holds every key the producer returns", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newMigratingTestSARE()
+		sapr := newTestNexusSAPR()
+		sapr.Spec.HTTP = &serviceaccountv2.HTTPProducer{Return: map[serviceaccountv2.AttributeName]serviceaccountv2.ProducerReturnDefinition{
+			"username": {Description: "user name"},
+			"password": {Description: "password"},
+		}}
+		migrationSecret := newMigrationSecret(map[string]string{
+			"nexus_username": "baseline-user",
+			"nexus_password": "secret",
+		})
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(migrationSecret).Build()
+
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, sapr)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"username": "baseline-user", "password": "secret"}, credentials)
+	})
+
+	t.Run("should return all of the producer's keys without validation when the producer declares no return keys", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newMigratingTestSARE()
+		sapr := newTestNexusSAPR()
+		sapr.Spec.HTTP = &serviceaccountv2.HTTPProducer{}
+		migrationSecret := newMigrationSecret(map[string]string{"nexus_username": "baseline-user"})
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(migrationSecret).Build()
+
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, sapr)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"username": "baseline-user"}, credentials)
+	})
+
+	t.Run("should return error naming the missing keys when the migration secret lacks a key the producer returns", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		sare := newMigratingTestSARE()
+		sapr := newTestNexusSAPR()
+		sapr.Spec.HTTP = &serviceaccountv2.HTTPProducer{Return: map[serviceaccountv2.AttributeName]serviceaccountv2.ProducerReturnDefinition{
+			"username":   {Description: "user name"},
+			"password":   {Description: "password"},
+			"repository": {Description: "repository"},
+		}}
+		migrationSecret := newMigrationSecret(map[string]string{
+			"nexus_username": "baseline-user",
+			"nexus_password": "secret",
+		})
+		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(migrationSecret).Build()
+
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, sapr)
+
+		require.ErrorIs(t, err, ErrIncompleteMigrationSecret)
+		assert.ErrorContains(t, err, "\"baseline-migration\"")
+		assert.ErrorContains(t, err, "nexus_repository")
+		assert.Empty(t, credentials)
 	})
 
 	t.Run("should not find credentials when the migration secret does not exist", func(t *testing.T) {
@@ -67,7 +124,7 @@ func TestMigrationSource_Credentials(t *testing.T) {
 		sare := newMigratingTestSARE()
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.NoError(t, err)
 		assert.Empty(t, credentials)
@@ -79,7 +136,7 @@ func TestMigrationSource_Credentials(t *testing.T) {
 		migrationSecret := newMigrationSecret(map[string]string{"ldap_username": "other-user"})
 		rtClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(migrationSecret).Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.NoError(t, err)
 		assert.Empty(t, credentials)
@@ -97,12 +154,19 @@ func TestMigrationSource_Credentials(t *testing.T) {
 			}).
 			Build()
 
-		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare)
+		credentials, err := NewMigrationSource(rtClient).Credentials(testCtx, sare, newTestNexusSAPR())
 
 		require.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to get migration secret \"baseline-migration\"")
 		assert.Empty(t, credentials)
 	})
+}
+
+func newTestNexusSAPR() *serviceaccountv2.ServiceAccountProducer {
+	return &serviceaccountv2.ServiceAccountProducer{
+		ObjectMeta: metav1.ObjectMeta{Name: "nexus", Namespace: "ecosystem"},
+		Spec:       serviceaccountv2.ServiceAccountProducerSpec{Producer: "nexus"},
+	}
 }
 
 func newMigratingTestSARE() *serviceaccountv2.ServiceAccountRequest {
