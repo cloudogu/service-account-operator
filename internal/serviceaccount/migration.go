@@ -66,7 +66,7 @@ func (ms *MigrationSource) Credentials(ctx context.Context, sare *serviceaccount
 	}
 
 	if len(credentials) == 0 {
-		return credentials, nil
+		return nil, nil
 	}
 
 	var missingKeys []string

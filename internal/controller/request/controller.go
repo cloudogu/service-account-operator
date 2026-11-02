@@ -119,14 +119,15 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 		}
 
 		return ctrl.Result{}, c.fail(ctx, sare, err)
-	} else if result.abort {
-		return ctrl.Result{}, nil
 	}
 
-	if result.migrated {
+	switch result.outcome {
+	case outcomeAborted:
+		return ctrl.Result{}, nil
+	case outcomeMigrated:
 		err = serviceAccountMigrated(ctx, c.client, sare, result.secretName)
-	} else {
-		err = serviceAccountReady(ctx, c.client, sare, result.secretName, result.isRotation)
+	case outcomeRotated, outcomeUnchanged:
+		err = serviceAccountReady(ctx, c.client, sare, result.secretName, result.outcome == outcomeRotated)
 	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
@@ -135,15 +136,27 @@ func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *servicea
 	return ctrl.Result{}, nil
 }
 
-// createOrUpdateResult is the outcome of a successful or aborted create/update of a service account.
+// createOrUpdateOutcome tells what a create/update of a service account did.
+type createOrUpdateOutcome int
+
+const (
+	// outcomeAborted means the create/update stopped early, either with an error or without anything to do.
+	outcomeAborted createOrUpdateOutcome = iota
+	// outcomeRotated means the producer returned new credentials, which were stored in the secret.
+	outcomeRotated
+	// outcomeUnchanged means the producer returned no credentials on update, so the secret stays as it is.
+	outcomeUnchanged
+	// outcomeMigrated means the credentials were taken over from the migration secret without calling the producer.
+	outcomeMigrated
+)
+
+// createOrUpdateResult is the outcome of a create/update of a service account.
 type createOrUpdateResult struct {
 	secretName string
-	isRotation bool
-	migrated   bool
-	abort      bool
+	outcome    createOrUpdateOutcome
 }
 
-var abortedCreateOrUpdate = createOrUpdateResult{abort: true}
+var abortedCreateOrUpdate = createOrUpdateResult{outcome: outcomeAborted}
 
 func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (createOrUpdateResult, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
@@ -167,9 +180,11 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 	}
 
 	if !secretExists {
-		result, err := c.migrateCredentials(ctx, sare, sapr, logger)
-		if err != nil || result.migrated {
-			return result, err
+		migratedSecretName, err := c.migrateCredentials(ctx, sare, sapr, logger)
+		if err != nil {
+			return abortedCreateOrUpdate, err
+		} else if migratedSecretName != "" {
+			return createOrUpdateResult{secretName: migratedSecretName, outcome: outcomeMigrated}, nil
 		}
 	}
 
@@ -178,20 +193,20 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 		return abortedCreateOrUpdate, err
 	}
 
-	isRotation := credentials != nil
-	if isRotation {
-		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
-		if err != nil {
-			return abortedCreateOrUpdate, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
-		}
-
-		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
-		c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
-	} else {
+	if credentials == nil {
 		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
+		return createOrUpdateResult{secretName: secretName, outcome: outcomeUnchanged}, nil
 	}
 
-	return createOrUpdateResult{secretName: secretName, isRotation: isRotation}, nil
+	secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+	if err != nil {
+		return abortedCreateOrUpdate, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
+	}
+
+	createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
+
+	return createOrUpdateResult{secretName: secretName, outcome: outcomeRotated}, nil
 }
 
 func (c *Controller) getProducerForCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (sapr *serviceaccountv2.ServiceAccountProducer, abort bool, err error) {
@@ -240,29 +255,30 @@ func createdOrUpdated(secretExists bool) string {
 }
 
 // migrateCredentials stores the credentials from the migration secret of a consumer dogu migrated from Dogu V2 without calling the producer.
-func (c *Controller) migrateCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, logger logr.Logger) (createOrUpdateResult, error) {
+// It returns the name of the created secret, or an empty string if there is nothing to migrate.
+func (c *Controller) migrateCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, logger logr.Logger) (string, error) {
 	credentials, err := c.migrationSource.Credentials(ctx, sare, sapr)
 	if err != nil {
 		if errors.Is(err, sa.ErrIncompleteMigrationSecret) {
-			c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeWarning, "ServiceAccountRequest", "MigrationFailed", "Failed to migrate service account %q: %s", sare.Spec.Consumer, err.Error())
+			c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeWarning, "ServiceAccountRequest", conditionReasonMigrationFailed, "Failed to migrate service account %q: %s", sare.Spec.Consumer, err.Error())
 		}
 
-		return abortedCreateOrUpdate, fmt.Errorf("failed to read migrated credentials: %w", err)
+		return "", fmt.Errorf("failed to read migrated credentials: %w", err)
 	}
 
-	if len(credentials) == 0 {
-		return createOrUpdateResult{}, nil
+	if credentials == nil {
+		return "", nil
 	}
 
 	logger.Info("taking over migrated service account credentials instead of requesting them from the producer", "producer", sare.Spec.Producer)
 	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
 	if err != nil {
-		return abortedCreateOrUpdate, fmt.Errorf("failed to store migrated credentials in Kubernetes secret: %w", err)
+		return "", fmt.Errorf("failed to store migrated credentials in Kubernetes secret: %w", err)
 	}
 
-	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccountMigrated", "Migrated service account %q from secret %q", sare.Spec.Consumer, sa.MigrationSecretName(sare))
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", conditionReasonServiceAccountMigrated, "Migrated service account %q from secret %q", sare.Spec.Consumer, sa.MigrationSecretName(sare))
 
-	return createOrUpdateResult{secretName: secretName, migrated: true}, nil
+	return secretName, nil
 }
 
 func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {
