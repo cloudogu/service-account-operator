@@ -17,6 +17,11 @@ type secretManager interface {
 	Delete(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) error
 }
 
+// migrationSource provides the credentials of a consumer dogu migrated from Dogu V2.
+type migrationSource interface {
+	Credentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer) (map[string]string, error)
+}
+
 // producerClientFactory builds an HTTPClient for a given ServiceAccountProducer,
 // resolving the API key from the referenced Kubernetes Secret.
 type producerClientFactory interface {

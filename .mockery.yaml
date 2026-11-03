@@ -11,6 +11,9 @@ dir: "{{.InterfaceDir}}"
 filename: "mocks_test.go"
 pkgname: "{{.SrcPackageName}}"
 structname: "{{.Mock}}{{.InterfaceName | firstUpper }}"
+# Tests set expectations for variadic methods (e.g. Eventf) with the arguments unrolled.
+template-data:
+  unroll-variadic: true
 
 exclude-subpkg-regex:
   - "vendor"

@@ -33,11 +33,6 @@ include build/make/k8s-controller.mk
 
 GO_BUILD_FLAGS=-mod=vendor -a -o $(BINARY) ./cmd/main.go
 
-.PHONY: mocks
-mocks: ${MOCKERY_BIN} ${MOCKERY_YAML} ## target is used to generate mocks for all interfaces in a project.
-	${MOCKERY_BIN}
-	@echo "Mocks successfully created."
-
 .PHONY: build-boot
 build-boot: helm-apply kill-operator-pod ## Builds a new version of the operator and deploys it into the K8s-EcoSystem.
 

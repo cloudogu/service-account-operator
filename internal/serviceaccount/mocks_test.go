@@ -52,13 +52,15 @@ func (_m *mockK8sClient) EXPECT() *mockK8sClient_Expecter {
 
 // Apply provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj)
+	// client.ApplyOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -98,9 +100,11 @@ func (_c *mockK8sClient_Apply_Call) Run(run func(ctx context.Context, obj runtim
 			arg1 = args[1].(runtime.ApplyConfiguration)
 		}
 		var arg2 []client.ApplyOption
-		var variadicArgs []client.ApplyOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.ApplyOption)
+		variadicArgs := make([]client.ApplyOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.ApplyOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(
@@ -124,13 +128,15 @@ func (_c *mockK8sClient_Apply_Call) RunAndReturn(run func(ctx context.Context, o
 
 // Create provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj)
+	// client.CreateOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
@@ -170,9 +176,11 @@ func (_c *mockK8sClient_Create_Call) Run(run func(ctx context.Context, obj clien
 			arg1 = args[1].(client.Object)
 		}
 		var arg2 []client.CreateOption
-		var variadicArgs []client.CreateOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.CreateOption)
+		variadicArgs := make([]client.CreateOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.CreateOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(
@@ -196,13 +204,15 @@ func (_c *mockK8sClient_Create_Call) RunAndReturn(run func(ctx context.Context, 
 
 // Delete provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj)
+	// client.DeleteOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
@@ -242,9 +252,11 @@ func (_c *mockK8sClient_Delete_Call) Run(run func(ctx context.Context, obj clien
 			arg1 = args[1].(client.Object)
 		}
 		var arg2 []client.DeleteOption
-		var variadicArgs []client.DeleteOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.DeleteOption)
+		variadicArgs := make([]client.DeleteOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.DeleteOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(
@@ -268,13 +280,15 @@ func (_c *mockK8sClient_Delete_Call) RunAndReturn(run func(ctx context.Context, 
 
 // DeleteAllOf provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) DeleteAllOf(ctx context.Context, obj client.Object, opts ...client.DeleteAllOfOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj)
+	// client.DeleteAllOfOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteAllOf")
@@ -314,9 +328,11 @@ func (_c *mockK8sClient_DeleteAllOf_Call) Run(run func(ctx context.Context, obj 
 			arg1 = args[1].(client.Object)
 		}
 		var arg2 []client.DeleteAllOfOption
-		var variadicArgs []client.DeleteAllOfOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.DeleteAllOfOption)
+		variadicArgs := make([]client.DeleteAllOfOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.DeleteAllOfOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(
@@ -340,13 +356,15 @@ func (_c *mockK8sClient_DeleteAllOf_Call) RunAndReturn(run func(ctx context.Cont
 
 // Get provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, key, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, key, obj)
+	// client.GetOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, key, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
@@ -391,9 +409,11 @@ func (_c *mockK8sClient_Get_Call) Run(run func(ctx context.Context, key client.O
 			arg2 = args[2].(client.Object)
 		}
 		var arg3 []client.GetOption
-		var variadicArgs []client.GetOption
-		if len(args) > 3 {
-			variadicArgs = args[3].([]client.GetOption)
+		variadicArgs := make([]client.GetOption, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.GetOption)
+			}
 		}
 		arg3 = variadicArgs
 		run(
@@ -538,13 +558,15 @@ func (_c *mockK8sClient_IsObjectNamespaced_Call) RunAndReturn(run func(obj runti
 
 // List provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, list, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, list)
+	// client.ListOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, list)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -584,9 +606,11 @@ func (_c *mockK8sClient_List_Call) Run(run func(ctx context.Context, list client
 			arg1 = args[1].(client.ObjectList)
 		}
 		var arg2 []client.ListOption
-		var variadicArgs []client.ListOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.ListOption)
+		variadicArgs := make([]client.ListOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.ListOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(
@@ -610,13 +634,15 @@ func (_c *mockK8sClient_List_Call) RunAndReturn(run func(ctx context.Context, li
 
 // Patch provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, patch, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj, patch)
+	// client.PatchOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj, patch)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Patch")
@@ -661,9 +687,11 @@ func (_c *mockK8sClient_Patch_Call) Run(run func(ctx context.Context, obj client
 			arg2 = args[2].(client.Patch)
 		}
 		var arg3 []client.PatchOption
-		var variadicArgs []client.PatchOption
-		if len(args) > 3 {
-			variadicArgs = args[3].([]client.PatchOption)
+		variadicArgs := make([]client.PatchOption, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.PatchOption)
+			}
 		}
 		arg3 = variadicArgs
 		run(
@@ -879,13 +907,15 @@ func (_c *mockK8sClient_SubResource_Call) RunAndReturn(run func(subResource stri
 
 // Update provides a mock function for the type mockK8sClient
 func (_mock *mockK8sClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
-	var tmpRet mock.Arguments
-	if len(opts) > 0 {
-		tmpRet = _mock.Called(ctx, obj, opts)
-	} else {
-		tmpRet = _mock.Called(ctx, obj)
+	// client.UpdateOption
+	_va := make([]any, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
 	}
-	ret := tmpRet
+	var _ca []any
+	_ca = append(_ca, ctx, obj)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Update")
@@ -925,9 +955,11 @@ func (_c *mockK8sClient_Update_Call) Run(run func(ctx context.Context, obj clien
 			arg1 = args[1].(client.Object)
 		}
 		var arg2 []client.UpdateOption
-		var variadicArgs []client.UpdateOption
-		if len(args) > 2 {
-			variadicArgs = args[2].([]client.UpdateOption)
+		variadicArgs := make([]client.UpdateOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(client.UpdateOption)
+			}
 		}
 		arg2 = variadicArgs
 		run(

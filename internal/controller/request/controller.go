@@ -39,6 +39,7 @@ const (
 type Controller struct {
 	client                k8sClient
 	secretManager         secretManager
+	migrationSource       migrationSource
 	producerClientFactory producerClientFactory
 	operatorConfig        *config.OperatorConfig
 	eventRecorder         eventRecorder
@@ -55,18 +56,19 @@ func (d *defaultCronTaskFactory) New(ctx context.Context, expr string, jobClosur
 func New(rtClient k8sClient, scheme *runtime.Scheme, operatorConfig *config.OperatorConfig, eventRecorder eventRecorder) (controller *Controller, cleanup func()) {
 	runners := make(map[string]cron.TaskRunner)
 	return &Controller{
-			client:                rtClient,
-			secretManager:         sa.NewSecretManager(rtClient, scheme),
-			producerClientFactory: producer.NewClientFactory(rtClient),
-			operatorConfig:        operatorConfig,
-			eventRecorder:         eventRecorder,
-			cronTaskFactory:       new(defaultCronTaskFactory),
-			rotateCronWatcher:     runners,
-		}, func() {
-			for _, runner := range runners {
-				runner.Stop()
-			}
+		client:                rtClient,
+		secretManager:         sa.NewSecretManager(rtClient, scheme),
+		migrationSource:       sa.NewMigrationSource(rtClient),
+		producerClientFactory: producer.NewClientFactory(rtClient),
+		operatorConfig:        operatorConfig,
+		eventRecorder:         eventRecorder,
+		cronTaskFactory:       new(defaultCronTaskFactory),
+		rotateCronWatcher:     runners,
+	}, func() {
+		for _, runner := range runners {
+			runner.Stop()
 		}
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -110,26 +112,58 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // See cloudogu/service-account-operator#8
 
 func (c *Controller) reconcileCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (ctrl.Result, error) {
-	secretName, isRotation, abort, err := c.createOrUpdate(ctx, sare)
+	result, err := c.createOrUpdate(ctx, sare)
 	if err != nil {
+		if errors.Is(err, sa.ErrIncompleteMigrationSecret) {
+			return ctrl.Result{}, c.failWithReason(ctx, sare, conditionReasonMigrationFailed, err)
+		}
+
 		return ctrl.Result{}, c.fail(ctx, sare, err)
-	} else if abort {
-		return ctrl.Result{}, nil
 	}
 
-	if err := serviceAccountReady(ctx, c.client, sare, secretName, isRotation); err != nil {
+	switch result.outcome {
+	case outcomeAborted:
+		return ctrl.Result{}, nil
+	case outcomeMigrated:
+		err = serviceAccountMigrated(ctx, c.client, sare, result.secretName)
+	case outcomeRotated, outcomeUnchanged:
+		err = serviceAccountReady(ctx, c.client, sare, result.secretName, result.outcome == outcomeRotated)
+	}
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update status after successful create/update for %q: %w", sare.Name, err)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (secretName string, isRotation bool, abort bool, err error) {
+// createOrUpdateOutcome tells what a create/update of a service account did.
+type createOrUpdateOutcome int
+
+const (
+	// outcomeAborted means the create/update stopped early, either with an error or without anything to do.
+	outcomeAborted createOrUpdateOutcome = iota
+	// outcomeRotated means the producer returned new credentials, which were stored in the secret.
+	outcomeRotated
+	// outcomeUnchanged means the producer returned no credentials on update, so the secret stays as it is.
+	outcomeUnchanged
+	// outcomeMigrated means the credentials were taken over from the migration secret without calling the producer.
+	outcomeMigrated
+)
+
+// createOrUpdateResult is the outcome of a create/update of a service account.
+type createOrUpdateResult struct {
+	secretName string
+	outcome    createOrUpdateOutcome
+}
+
+var abortedCreateOrUpdate = createOrUpdateResult{outcome: outcomeAborted}
+
+func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest) (createOrUpdateResult, error) {
 	logger := logf.FromContext(ctx).WithValues("serviceAccountRequest", sare.Name)
 
 	secretExists, secretName, err := c.checkSecretExists(ctx, sare, logger)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
 	createOrUpdateString := createdOrUpdated(secretExists)
@@ -137,33 +171,42 @@ func (c *Controller) createOrUpdate(ctx context.Context, sare *serviceaccountv2.
 
 	err = c.handleSaRotationWatcher(ctx, sare)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
 	sapr, abort, err := c.getProducerForCreateOrUpdate(ctx, sare, logger)
 	if abort || err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
+	}
+
+	if !secretExists {
+		migratedSecretName, err := c.migrateCredentials(ctx, sare, sapr, logger)
+		if err != nil {
+			return abortedCreateOrUpdate, err
+		} else if migratedSecretName != "" {
+			return createOrUpdateResult{secretName: migratedSecretName, outcome: outcomeMigrated}, nil
+		}
 	}
 
 	credentials, err := c.requestCredentials(ctx, sare, sapr, secretExists)
 	if err != nil {
-		return "", false, true, err
+		return abortedCreateOrUpdate, err
 	}
 
-	isRotation = credentials != nil
-	if isRotation {
-		secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
-		if err != nil {
-			return "", false, true, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
-		}
-
-		createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
-		c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
-	} else {
+	if credentials == nil {
 		logger.Info("The producer did not return credentials upon update indicating no change. Skipping the secret update.", "producer", sare.Spec.Producer)
+		return createOrUpdateResult{secretName: secretName, outcome: outcomeUnchanged}, nil
 	}
 
-	return secretName, isRotation, false, nil
+	secretName, err = c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+	if err != nil {
+		return abortedCreateOrUpdate, fmt.Errorf("failed to store credentials in Kubernetes secret: %w", err)
+	}
+
+	createUpdateTitleString := cases.Title(language.English).String(createOrUpdateString)
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", "ServiceAccount"+createUpdateTitleString, "%s service account %q", createUpdateTitleString, sare.Spec.Consumer)
+
+	return createOrUpdateResult{secretName: secretName, outcome: outcomeRotated}, nil
 }
 
 func (c *Controller) getProducerForCreateOrUpdate(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, logger logr.Logger) (sapr *serviceaccountv2.ServiceAccountProducer, abort bool, err error) {
@@ -211,6 +254,33 @@ func createdOrUpdated(secretExists bool) string {
 	return createOrUpdateString
 }
 
+// migrateCredentials stores the credentials from the migration secret of a consumer dogu migrated from Dogu V2 without calling the producer.
+// It returns the name of the created secret, or an empty string if there is nothing to migrate.
+func (c *Controller) migrateCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, logger logr.Logger) (string, error) {
+	credentials, err := c.migrationSource.Credentials(ctx, sare, sapr)
+	if err != nil {
+		if errors.Is(err, sa.ErrIncompleteMigrationSecret) {
+			c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeWarning, "ServiceAccountRequest", conditionReasonMigrationFailed, "Failed to migrate service account %q: %s", sare.Spec.Consumer, err.Error())
+		}
+
+		return "", fmt.Errorf("failed to read migrated credentials: %w", err)
+	}
+
+	if credentials == nil {
+		return "", nil
+	}
+
+	logger.Info("taking over migrated service account credentials instead of requesting them from the producer", "producer", sare.Spec.Producer)
+	secretName, err := c.secretManager.CreateOrUpdate(ctx, sare, credentials)
+	if err != nil {
+		return "", fmt.Errorf("failed to store migrated credentials in Kubernetes secret: %w", err)
+	}
+
+	c.eventRecorder.Eventf(sapr, sare, corev1.EventTypeNormal, "ServiceAccountRequest", conditionReasonServiceAccountMigrated, "Migrated service account %q from secret %q", sare.Spec.Consumer, sa.MigrationSecretName(sare))
+
+	return secretName, nil
+}
+
 func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, sapr *serviceaccountv2.ServiceAccountProducer, secretExists bool) (map[string]string, error) {
 	saClient, err := c.getServiceAccountClient(ctx, sare, sapr)
 	if err != nil {
@@ -222,7 +292,7 @@ func (c *Controller) requestCredentials(ctx context.Context, sare *serviceaccoun
 		behaviorParams.RotateServiceAccountNow = true
 	}
 
-	credentials, err := saClient.CreateOrUpdate(ctx, qualifiedConsumer(sare), sare.Spec.Params, behaviorParams)
+	credentials, err := saClient.CreateOrUpdate(ctx, sare.Spec.Consumer, sare.Spec.Params, behaviorParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create/update service account at producer %q: %w", sapr.Name, err)
 	}
@@ -251,10 +321,14 @@ func (c *Controller) getServiceAccountClient(ctx context.Context, sare *servicea
 	return saClient, nil
 }
 
-// fail records a failed ServiceAccountReady condition and returns the original
-// error so the reconcile is retried with backoff.
+// fail records a failed ServiceAccountReady condition with reason ServiceAccountFailed and returns the original error so the reconcile is retried with backoff.
 func (c *Controller) fail(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
-	if patchErr := serviceAccountFailed(ctx, c.client, sare, err); patchErr != nil {
+	return c.failWithReason(ctx, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, err)
+}
+
+// failWithReason records a failed ServiceAccountReady condition with the given reason and returns the original error so the reconcile is retried with backoff.
+func (c *Controller) failWithReason(ctx context.Context, sare *serviceaccountv2.ServiceAccountRequest, reason string, err error) error {
+	if patchErr := serviceAccountFailed(ctx, c.client, sare, reason, err); patchErr != nil {
 		logf.FromContext(ctx).Error(patchErr, "failed to update status conditions after reconcile error")
 	}
 
@@ -383,7 +457,7 @@ func (c *Controller) deleteServiceAccount(ctx context.Context, sare *serviceacco
 		return err
 	}
 
-	consumer := qualifiedConsumer(sare)
+	consumer := sare.Spec.Consumer
 	exists, err := saClient.Exists(ctx, consumer)
 	if err != nil {
 		return fmt.Errorf("failed to check if service account %q exists at producer %q: %w", sare.Spec.Consumer, sapr.Name, err)
@@ -492,12 +566,6 @@ func (c *Controller) enqueueRequestsForProducer(ctx context.Context, obj client.
 	}
 
 	return requests
-}
-
-// qualifiedConsumer returns a namespace-qualified consumer name to ensure uniqueness across namespaces.
-// For example, a consumer "grafana" in namespace "ecosystem" becomes "grafana-ecosystem".
-func qualifiedConsumer(sare *serviceaccountv2.ServiceAccountRequest) string {
-	return sare.Spec.Consumer + "-" + sare.Namespace
 }
 
 // namespacedName returns a namespace-qualified SARE name to ensure uniqueness across namespaces. The resource name's

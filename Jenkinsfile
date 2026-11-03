@@ -1,6 +1,6 @@
 #!groovy
 
-@Library('github.com/cloudogu/ces-build-lib@5.3.1')
+@Library('github.com/cloudogu/ces-build-lib@6.0.0')
 import com.cloudogu.ces.cesbuildlib.*
 
 git = new Git(this, "cesmarvin")
@@ -134,6 +134,7 @@ void stageSmokeTest(Makefile makefile) {
         String controllerVersion = makefile.getVersion()
 
         stage('Set up k3d cluster') {
+            k3d.installHelmManually()
             k3d.startK3d()
         }
 
