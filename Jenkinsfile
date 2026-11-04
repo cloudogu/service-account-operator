@@ -1,6 +1,6 @@
 #!groovy
 
-@Library('github.com/cloudogu/ces-build-lib@5.3.1')
+@Library('github.com/cloudogu/ces-build-lib@6.0.0')
 import com.cloudogu.ces.cesbuildlib.*
 
 git = new Git(this, "cesmarvin")
@@ -11,7 +11,7 @@ github = new GitHub(this, git)
 changelog = new Changelog(this)
 Docker docker = new Docker(this)
 gpg = new Gpg(this, docker)
-goVersion = "1.26.2"
+goVersion = "1.27.3"
 Makefile makefile = new Makefile(this)
 
 repositoryOwner = "cloudogu"
@@ -134,6 +134,7 @@ void stageSmokeTest(Makefile makefile) {
         String controllerVersion = makefile.getVersion()
 
         stage('Set up k3d cluster') {
+            k3d.installHelmManually()
             k3d.startK3d()
         }
 

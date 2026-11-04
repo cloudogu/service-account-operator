@@ -102,6 +102,26 @@ func TestServiceAccountReady(t *testing.T) {
 	})
 }
 
+func TestServiceAccountMigrated(t *testing.T) {
+	t.Run("should set ServiceAccountReady=True with ServiceAccountMigrated reason without rotation and persist to cluster", func(t *testing.T) {
+		sare := createTestMigratingSare()
+		sare.Finalizers = []string{finalizer}
+		rtClient := buildStatusClient(t, sare)
+
+		err := serviceAccountMigrated(testCtx, rtClient, sare, "baseline-to-nexus")
+
+		require.NoError(t, err)
+		updated := getFreshSareFromCluster(t, rtClient, sare)
+		cond := apimeta.FindStatusCondition(updated.Status.Conditions, serviceaccountv2.ConditionTypeServiceAccountReady)
+		require.NotNil(t, cond)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, "ServiceAccountMigrated", cond.Reason)
+		require.NotNil(t, updated.Status.SecretRef)
+		assert.Equal(t, "baseline-to-nexus", updated.Status.SecretRef.Name)
+		assert.Empty(t, updated.Status.LastRotation)
+	})
+}
+
 func TestServiceAccountFailed(t *testing.T) {
 	t.Run("should set ServiceAccountReady=False with error message and persist to cluster", func(t *testing.T) {
 		sare := createTestSare()
@@ -110,7 +130,7 @@ func TestServiceAccountFailed(t *testing.T) {
 		rtClient := buildStatusClient(t, sare)
 
 		reconcileErr := errors.New("connection refused")
-		err := serviceAccountFailed(testCtx, rtClient, sare, reconcileErr)
+		err := serviceAccountFailed(testCtx, rtClient, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, reconcileErr)
 
 		require.NoError(t, err)
 		updated := getFreshSareFromCluster(t, rtClient, sare)
@@ -127,7 +147,7 @@ func TestServiceAccountFailed(t *testing.T) {
 		sare.Finalizers = []string{finalizer}
 		rtClient := buildStatusClientWithoutObject(t)
 
-		err := serviceAccountFailed(testCtx, rtClient, sare, errors.New("boom"))
+		err := serviceAccountFailed(testCtx, rtClient, sare, serviceaccountv2.ConditionReasonServiceAccountReadyFailed, errors.New("boom"))
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeServiceAccountReady)

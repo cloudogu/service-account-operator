@@ -47,7 +47,8 @@ func TestMarkReady(t *testing.T) {
 		err := markReady(testCtx, rtClient, sapr)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeReady)
+		assert.ErrorContains(t, err, "failed to persist conditions")
+		assert.ErrorContains(t, err, "not found")
 	})
 }
 
@@ -76,7 +77,8 @@ func TestMarkNotReady(t *testing.T) {
 			serviceaccountv2.ConditionReadyReasonAuthSecretNotFound, "secret missing")
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), serviceaccountv2.ConditionTypeReady)
+		assert.ErrorContains(t, err, "failed to persist conditions")
+		assert.ErrorContains(t, err, "not found")
 	})
 }
 

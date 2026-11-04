@@ -1,10 +1,10 @@
 # Set these to the desired values
 ARTIFACT_ID=service-account-operator
-VERSION=1.0.0
+VERSION=1.1.0
 IMAGE=cloudogu/${ARTIFACT_ID}:${VERSION}
-GOTAG=1.26.0
-MAKEFILES_VERSION=10.10.0
-LINT_VERSION?=v2.9.0
+GOTAG=1.27.3
+MAKEFILES_VERSION=11.1.3
+LINT_VERSION?=v2.15.0
 
 STAGE?=production
 
@@ -32,11 +32,6 @@ IMAGE_IMPORT_TARGET=image-import
 include build/make/k8s-controller.mk
 
 GO_BUILD_FLAGS=-mod=vendor -a -o $(BINARY) ./cmd/main.go
-
-.PHONY: mocks
-mocks: ${MOCKERY_BIN} ${MOCKERY_YAML} ## target is used to generate mocks for all interfaces in a project.
-	${MOCKERY_BIN}
-	@echo "Mocks successfully created."
 
 .PHONY: build-boot
 build-boot: helm-apply kill-operator-pod ## Builds a new version of the operator and deploys it into the K8s-EcoSystem.

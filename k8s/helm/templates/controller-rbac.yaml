@@ -28,6 +28,26 @@ rules:
       - watch
       - delete
   - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - create
+      - update
+      - list
+      {{/* watch is actually needed by the controller-runtime client for caching */}}
+      - watch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - k8s.cloudogu.com
     resources:
       - serviceaccountrequests/status

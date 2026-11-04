@@ -28,6 +28,21 @@ func serviceAccountReady(ctx context.Context, c client.Client, sare *serviceacco
 		serviceaccountv2.ConditionReasonServiceAccountReadyCreated, "")
 }
 
+// conditionReasonServiceAccountMigrated is defined locally until it is needed in k8s-serviceaccount-lib.
+const conditionReasonServiceAccountMigrated = "ServiceAccountMigrated"
+
+// conditionReasonMigrationFailed is defined locally until it is needed in k8s-serviceaccount-lib.
+const conditionReasonMigrationFailed = "MigrationFailed"
+
+// serviceAccountMigrated records the created secret and sets ServiceAccountReady=True with reason "ServiceAccountMigrated".
+// A migration is no rotation, so lastRotation stays unset.
+func serviceAccountMigrated(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, secretName string) error {
+	return setAndPersist(ctx, c, sare, func() {
+		sare.Status.SecretRef = &serviceaccountv2.LocalSecretRef{Name: secretName}
+	}, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionTrue,
+		conditionReasonServiceAccountMigrated, "")
+}
+
 // serviceAccountNotReadyForRotation removes a previously created secret and sets ServiceAccountReady=false. The given
 // SARE will later be reconciled where the ready condition might be re-set to ready.
 func serviceAccountNotReadyForRotation(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest) error {
@@ -37,10 +52,10 @@ func serviceAccountNotReadyForRotation(ctx context.Context, c client.Client, sar
 		"SecretRotationInProgress", "")
 }
 
-// serviceAccountFailed sets ServiceAccountReady=False with the error message and persists the condition.
-func serviceAccountFailed(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, err error) error {
+// serviceAccountFailed sets ServiceAccountReady=False with the given reason and the error message and persists the condition.
+func serviceAccountFailed(ctx context.Context, c client.Client, sare *serviceaccountv2.ServiceAccountRequest, reason string, err error) error {
 	return setAndPersist(ctx, c, sare, nil, serviceaccountv2.ConditionTypeServiceAccountReady, metav1.ConditionFalse,
-		serviceaccountv2.ConditionReasonServiceAccountReadyFailed, err.Error())
+		reason, err.Error())
 }
 
 // setAndPersist applies an optional status mutation plus a condition to the SARE and patches the status subresource.
